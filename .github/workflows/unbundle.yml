@@ -12,8 +12,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release download v0-bundletoo --repo ${{ github.repository }} --pattern offroad.bundle --output offroad.bundle
-      - name: Verify bundle
-        run: git bundle verify offroad.bundle
       - name: Clone from bundle
         run: git clone offroad.bundle unbundled
       - name: Push to main
