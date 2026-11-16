@@ -11,12 +11,12 @@ jobs:
       - name: Download release asset
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release download v0-bundletoo --repo ${{ github.repository }} --pattern offroad.bundle --output offroad.bundle
+        run: gh release download v0-bundletoo --repo ${{ github.repository }} --pattern offroad2.bundle --output offroad2.bundle
       - name: Clone from bundle
-        run: git clone offroad.bundle unbundled
+        run: git clone offroad2.bundle unbundled
       - name: Push to main
         run: |
           cd unbundled
-          git checkout master
+          git checkout squashed
           git remote set-url origin https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
-          git push origin master:main
+          git push origin squashed:main
