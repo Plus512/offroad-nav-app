@@ -1,0 +1,24 @@
+name: Unbundle release into main
+on:
+  push:
+    branches: [ bootstrap ]
+jobs:
+  unbundle:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download v0-bundletoo --repo ${{ github.repository }} --pattern offroad.bundle --output offroad.bundle
+      - name: Verify bundle
+        run: git bundle verify offroad.bundle
+      - name: Clone from bundle
+        run: git clone offroad.bundle unbundled
+      - name: Push to main
+        run: |
+          cd unbundled
+          git checkout master
+          git remote set-url origin https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
+          git push origin master:main
