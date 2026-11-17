@@ -9,6 +9,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.GridLayout
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import java.io.File
@@ -57,32 +58,41 @@ class MenuActivity : Activity() {
             "⚙" to "الإعدادات",
         )
 
+        // عرض كل خلية يُحسب من عرض الشاشة الفعلي حتى تظهر ٣ أعمدة دائماً، مهما كان حجم الشاشة.
+        val screenWidthPx = resources.displayMetrics.widthPixels
+        val sidePaddingPx = dp(30) * 2
+        val marginPerCellPx = dp(8) * 2
+        val cellWidthPx = (screenWidthPx - sidePaddingPx) / 3 - marginPerCellPx
+
         for ((icon, label) in items) {
-            grid.addView(menuItem(icon, label))
+            grid.addView(menuItem(icon, label, cellWidthPx))
         }
         root.addView(grid)
 
-        setContentView(root)
+        val scroll = ScrollView(this)
+        scroll.setBackgroundColor(GTheme.BEZEL)
+        scroll.addView(root)
+        setContentView(scroll)
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density + 0.5f).toInt()
 
-    private fun menuItem(icon: String, label: String): LinearLayout {
+    private fun menuItem(icon: String, label: String, cellWidthPx: Int): LinearLayout {
         val cell = LinearLayout(this)
         cell.orientation = LinearLayout.VERTICAL
         cell.gravity = Gravity.CENTER
         cell.setBackgroundColor(GTheme.BAR_BG)
-        cell.setPadding(dp(14), dp(24), dp(14), dp(24))
+        cell.setPadding(dp(6), dp(20), dp(6), dp(20))
 
         val lp = GridLayout.LayoutParams()
-        lp.width = dp(155)
-        lp.height = dp(150)
+        lp.width = cellWidthPx
+        lp.height = dp(135)
         lp.setMargins(dp(8), dp(8), dp(8), dp(8))
         cell.layoutParams = lp
 
         val ic = TextView(this)
         ic.text = icon
-        ic.textSize = 38f
+        ic.textSize = 32f
         ic.setTextColor(GTheme.ACCENT)
         ic.gravity = Gravity.CENTER
 
