@@ -3,6 +3,7 @@ package com.alruwaili.garminnav
 import android.app.Activity
 import android.os.Bundle
 import android.view.Gravity
+import android.view.View
 import android.widget.GridLayout
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -16,11 +17,13 @@ class MenuActivity : Activity() {
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
+        root.layoutDirection = View.LAYOUT_DIRECTION_RTL
         root.setBackgroundColor(GTheme.BEZEL)
         root.setPadding(dp(30), dp(40), dp(30), dp(40))
 
         val title = TextView(this)
         title.text = "القائمة الرئيسية"
+        title.textDirection = View.TEXT_DIRECTION_RTL
         title.textSize = 26f
         title.setTextColor(GTheme.TEXT)
         title.gravity = Gravity.CENTER
@@ -60,8 +63,8 @@ class MenuActivity : Activity() {
         cell.setPadding(dp(14), dp(24), dp(14), dp(24))
 
         val lp = GridLayout.LayoutParams()
-        lp.width = dp(140)
-        lp.height = dp(140)
+        lp.width = dp(155)
+        lp.height = dp(150)
         lp.setMargins(dp(8), dp(8), dp(8), dp(8))
         cell.layoutParams = lp
 
@@ -73,7 +76,8 @@ class MenuActivity : Activity() {
 
         val tv = TextView(this)
         tv.text = label
-        tv.textSize = 13f
+        tv.textDirection = View.TEXT_DIRECTION_RTL
+        tv.textSize = 12f
         tv.setTextColor(GTheme.TEXT)
         tv.gravity = Gravity.CENTER
         tv.setPadding(0, dp(8), 0, 0)

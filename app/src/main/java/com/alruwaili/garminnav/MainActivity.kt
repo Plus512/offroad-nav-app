@@ -110,6 +110,7 @@ class MainActivity : Activity(), SensorEventListener, LocationListener {
         if (unit.isNotEmpty()) {
             val u = TextView(this)
             u.text = unit
+            u.textDirection = View.TEXT_DIRECTION_RTL
             u.textSize = 13f
             u.setTextColor(GTheme.MUTED)
             u.gravity = Gravity.CENTER
@@ -132,6 +133,7 @@ class MainActivity : Activity(), SensorEventListener, LocationListener {
         ic.setTextColor(GTheme.TEXT)
         val tv = TextView(this)
         tv.text = label
+        tv.textDirection = View.TEXT_DIRECTION_RTL
         tv.textSize = 14f
         tv.gravity = Gravity.CENTER
         tv.setTextColor(GTheme.MUTED)

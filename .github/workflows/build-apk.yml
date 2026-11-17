@@ -17,6 +17,8 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      # عداء ubuntu-latest يأتي ومعه Android SDK مُثبَّت مسبقاً (ANDROID_HOME)،
+      # فلا حاجة لتثبيته من جديد — هذا هو ما كان يفشل. نكتفي بقبول التراخيص.
       - name: Accept Android SDK licenses
         run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
