@@ -130,22 +130,43 @@ class MenuActivity : Activity() {
         val mapsDir = File(filesDir, "maps")
         if (!mapsDir.exists()) mapsDir.mkdirs()
         val dest = File(mapsDir, "almisharIMAP.img")
+        val tmp = File(mapsDir, "almisharIMAP.img.part")
         val main = Handler(Looper.getMainLooper())
 
-        Toast.makeText(this, "جارٍ تنزيل الخريطة…", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "جارٍ تنزيل الخريطة… (٥٥ ميجا، قد يستغرق دقائق على شبكة الجوال)", Toast.LENGTH_LONG).show()
 
         Thread {
-            try {
-                val conn = URL(MAP_DOWNLOAD_URL).openConnection() as HttpURLConnection
-                conn.connectTimeout = 15000
-                conn.readTimeout = 15000
-                conn.connect()
-                if (conn.responseCode != 200) {
-                    throw Exception("رمز استجابة الخادم: ${conn.responseCode}")
+            // الملف كبير (٥٥ ميجا) وقطع الاتصال أثناء التنزيل شائعة على شبكات الجوال؛
+            // لذلك نعيد المحاولة تلقائياً حتى ٣ مرات قبل الإبلاغ بالفشل، ونكتب في ملف
+            // مؤقت (.part) حتى لا يبقى ملف ناقص/تالف باسم الخريطة النهائي عند الفشل.
+            var lastError: Exception? = null
+            var success = false
+            for (attempt in 1..3) {
+                try {
+                    val conn = URL(MAP_DOWNLOAD_URL).openConnection() as HttpURLConnection
+                    conn.connectTimeout = 30000
+                    conn.readTimeout = 30000
+                    conn.connect()
+                    if (conn.responseCode != 200) {
+                        throw Exception("رمز استجابة الخادم: ${conn.responseCode}")
+                    }
+                    conn.inputStream.use { input ->
+                        tmp.outputStream().use { output -> input.copyTo(output) }
+                    }
+                    if (!tmp.renameTo(dest)) throw Exception("تعذّر حفظ الملف النهائي")
+                    success = true
+                    break
+                } catch (e: Exception) {
+                    lastError = e
+                    if (attempt < 3) {
+                        main.post {
+                            Toast.makeText(this, "انقطع الاتصال، إعادة المحاولة (${attempt}/3)…", Toast.LENGTH_SHORT).show()
+                        }
+                        Thread.sleep(2000)
+                    }
                 }
-                conn.inputStream.use { input ->
-                    dest.outputStream().use { output -> input.copyTo(output) }
-                }
+            }
+            if (success) {
                 main.post {
                     Toast.makeText(
                         this,
@@ -153,9 +174,10 @@ class MenuActivity : Activity() {
                         Toast.LENGTH_LONG
                     ).show()
                 }
-            } catch (e: Exception) {
+            } else {
+                tmp.delete()
                 main.post {
-                    Toast.makeText(this, "فشل التنزيل: ${e.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "فشل التنزيل بعد ٣ محاولات: ${lastError?.message} — جرّب على شبكة واي فاي", Toast.LENGTH_LONG).show()
                 }
             }
         }.start()
