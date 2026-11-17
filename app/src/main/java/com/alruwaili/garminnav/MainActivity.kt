@@ -218,9 +218,19 @@ class MainActivity : Activity(), SensorEventListener, LocationListener {
 
     override fun onLocationChanged(loc: Location) {
         map.onLocation(loc)
-        tvSpeed.text = (loc.speed * 3.6).roundToInt().toString()
-        lastLoc?.let { totalDistM += it.distanceTo(loc) }
-        lastLoc = loc
+
+        // أول إشارة GPS قد تكون غير دقيقة (دقة ضعيفة) فتُعطي سرعة وهمية كبيرة.
+        // لا تُعرض السرعة إلا إذا كانت القراءة مدعومة فعلياً ومنطقية (أقل من ٣٠٠ كم/س).
+        val speedKmh = if (loc.hasSpeed()) loc.speed * 3.6 else 0.0
+        tvSpeed.text = if (speedKmh in 0.0..300.0) speedKmh.roundToInt().toString() else "0"
+
+        // لا تُحسب المسافة من قراءة ذات دقة ضعيفة (> 50 متر) لتجنّب قفزة مسافة وهمية
+        // بين أول إشارة غير دقيقة والإشارة الجيدة التي تليها.
+        val accOk = !loc.hasAccuracy() || loc.accuracy <= 50f
+        if (accOk) {
+            lastLoc?.let { totalDistM += it.distanceTo(loc) }
+            lastLoc = loc
+        }
         tvDist.text = String.format("%.1f", totalDistM / 1000.0)
     }
 

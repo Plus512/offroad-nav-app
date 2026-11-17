@@ -17,10 +17,14 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * رابط ملف خريطتك على GitHub (raw). غيّره هنا فقط إذا رفعت الملف لمستودع/مسار آخر.
+ * رابط ملف خريطتك على GitHub (raw).
+ * ملاحظة مهمة: raw.githubusercontent.com لا يُقدّم الملف لتطبيق غير مسجَّل دخول إذا كان
+ * المستودع خاصاً (private) — هذا سبب خطأ ٤٠٤ عند التحميل. لذلك يجب أن يكون الملف
+ * في مستودع عام (public) منفصل عن كود التطبيق — تماماً كما تفعل مع خرائط تطبيقاتك الأخرى.
+ * غيّر الرابط هنا فقط إذا رفعت الملف لمستودع/مسار آخر.
  */
 const val MAP_DOWNLOAD_URL =
-    "https://raw.githubusercontent.com/Plus512/offroad-nav-app/main/maps/almisharIMAP.img"
+    "https://raw.githubusercontent.com/Plus512/offroad-nav-maps/main/almisharIMAP.img"
 
 /** القائمة الرئيسية بأسلوب قارمن: شبكة ٣×٣ أيقونات. */
 class MenuActivity : Activity() {
