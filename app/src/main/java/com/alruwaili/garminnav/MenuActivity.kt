@@ -1,13 +1,25 @@
 package com.alruwaili.garminnav
 
 import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.widget.GridLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+
+/**
+ * رابط ملف خريطتك على GitHub (raw). غيّره هنا فقط إذا رفعت الملف لمستودع/مسار آخر.
+ */
+const val MAP_DOWNLOAD_URL =
+    "https://raw.githubusercontent.com/Plus512/offroad-nav-app/main/maps/almisharIMAP.img"
 
 /** القائمة الرئيسية بأسلوب قارمن: شبكة ٣×٣ أيقونات. */
 class MenuActivity : Activity() {
@@ -87,13 +99,52 @@ class MenuActivity : Activity() {
 
         cell.setOnClickListener {
             when (label) {
-                "الإعدادات", "الطوارئ", "الأقمار الصناعية", "البوصلة", "المسارات", "النقاط المحفوظة", "بحث عن موقع" ->
+                "الإعدادات" -> startActivity(Intent(this, SettingsActivity::class.java))
+                "الطوارئ", "الأقمار الصناعية", "البوصلة", "المسارات", "النقاط المحفوظة", "بحث عن موقع" ->
                     Toast.makeText(this, "$label — قيد الإنشاء", Toast.LENGTH_SHORT).show()
-                "استيراد خريطة", "الخرائط" -> {
-                    Toast.makeText(this, "استيراد ملف قارمن .img — قيد الإنشاء", Toast.LENGTH_SHORT).show()
-                }
+                "استيراد خريطة", "الخرائط" -> downloadMap()
             }
         }
         return cell
+    }
+
+    /**
+     * تنزيل حقيقي لملف الخريطة من GitHub إلى تخزين التطبيق.
+     * ملاحظة صريحة: هذا يضع الملف على الجهاز فقط. رسم الطرق الفعلية منه
+     * لم يُفعَّل بعد (انظر MapCanvasView) — هذا عمل منفصل لم يكتمل.
+     */
+    private fun downloadMap() {
+        val mapsDir = File(filesDir, "maps")
+        if (!mapsDir.exists()) mapsDir.mkdirs()
+        val dest = File(mapsDir, "almisharIMAP.img")
+        val main = Handler(Looper.getMainLooper())
+
+        Toast.makeText(this, "جارٍ تنزيل الخريطة…", Toast.LENGTH_SHORT).show()
+
+        Thread {
+            try {
+                val conn = URL(MAP_DOWNLOAD_URL).openConnection() as HttpURLConnection
+                conn.connectTimeout = 15000
+                conn.readTimeout = 15000
+                conn.connect()
+                if (conn.responseCode != 200) {
+                    throw Exception("رمز استجابة الخادم: ${conn.responseCode}")
+                }
+                conn.inputStream.use { input ->
+                    dest.outputStream().use { output -> input.copyTo(output) }
+                }
+                main.post {
+                    Toast.makeText(
+                        this,
+                        "اكتمل التنزيل (${dest.length() / 1024 / 1024} ميجا) — الطرق لم تُفعَّل بعد",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            } catch (e: Exception) {
+                main.post {
+                    Toast.makeText(this, "فشل التنزيل: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
     }
 }

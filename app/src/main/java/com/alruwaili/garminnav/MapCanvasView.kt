@@ -27,6 +27,10 @@ class MapCanvasView(ctx: Context) : View(ctx) {
     var mapLoaded: Boolean = false
         set(v) { field = v; invalidate() }
 
+    /** مستوى تكبير اصطناعي (١-١٠) يُغيّر تباعد الشبكة فقط، بانتظار ربطه برسم خريطة حقيقية. */
+    var zoomLevel: Int = 5
+        set(v) { field = v; invalidate() }
+
     private val bg = Paint().apply { color = GTheme.SAND }
     private val gridPaint = Paint().apply {
         color = Color.argb(60, 0, 0, 0)
@@ -51,7 +55,7 @@ class MapCanvasView(ctx: Context) : View(ctx) {
         c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bg)
 
         // شبكة خفيفة فقط لإعطاء إحساس بالحركة والمسافة، وليست طرقاً حقيقية.
-        val step = 120
+        val step = (220 - zoomLevel * 18).coerceAtLeast(40)
         var y = (height % step)
         while (y < height) { c.drawLine(0f, y.toFloat(), width.toFloat(), y.toFloat(), gridPaint); y += step }
         var x = (width % step)

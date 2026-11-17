@@ -18,6 +18,8 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
+import java.io.File
 import kotlin.math.roundToInt
 
 /**
@@ -39,6 +41,10 @@ class MainActivity : Activity(), SensorEventListener, LocationListener {
     private var lm: LocationManager? = null
     private var totalDistM = 0.0
     private var lastLoc: Location? = null
+
+    private var zoomLevel = 5
+    private var tracking = false
+    private var trackStartDistM = 0.0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -77,8 +83,8 @@ class MainActivity : Activity(), SensorEventListener, LocationListener {
             startActivity(Intent(this, MenuActivity::class.java))
         })
         bottomBar.addView(garminButton("📍", "علامة") { markWaypoint() })
-        bottomBar.addView(garminButton("🔍", "تكبير") { /* تكبير/تصغير لاحقاً */ })
-        bottomBar.addView(garminButton("↪", "مسار") { /* تسجيل مسار لاحقاً */ })
+        bottomBar.addView(garminButton("🔍", "تكبير") { changeZoom(1) })
+        bottomBar.addView(garminButton("↪", "مسار") { toggleTracking() })
         root.addView(bottomBar, bottomLp)
 
         setContentView(root)
@@ -88,6 +94,31 @@ class MainActivity : Activity(), SensorEventListener, LocationListener {
         lm = getSystemService(LOCATION_SERVICE) as LocationManager
 
         askPerms()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // تحديث شاشة الخريطة إن عاد المستخدم من تنزيل خريطة جديدة في القائمة.
+        map.mapLoaded = mapFile().exists()
+    }
+
+    private fun mapFile(): File = File(filesDir, "maps/almisharIMAP.img")
+
+    private fun changeZoom(delta: Int) {
+        zoomLevel = (zoomLevel + delta).coerceIn(1, 10)
+        map.zoomLevel = zoomLevel
+        Toast.makeText(this, "مستوى التكبير: $zoomLevel", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun toggleTracking() {
+        tracking = !tracking
+        if (tracking) {
+            trackStartDistM = totalDistM
+            Toast.makeText(this, "بدأ تسجيل المسار", Toast.LENGTH_SHORT).show()
+        } else {
+            val d = (totalDistM - trackStartDistM) / 1000.0
+            Toast.makeText(this, String.format("انتهى المسار: %.2f كم", d), Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density + 0.5f).toInt()
@@ -166,6 +197,12 @@ class MainActivity : Activity(), SensorEventListener, LocationListener {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             startLocation()
+        } else {
+            Toast.makeText(
+                this,
+                "إذن الموقع مرفوض — فعّله يدوياً من إعدادات الهاتف ← التطبيقات ← ملاح البر ← الأذونات",
+                Toast.LENGTH_LONG
+            ).show()
         }
     }
 
