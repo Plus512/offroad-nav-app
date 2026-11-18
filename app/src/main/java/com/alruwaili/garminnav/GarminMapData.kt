@@ -60,7 +60,10 @@ class Subdivision(
 }
 
 /** خط مُفكَّك (طريق أو حدود مضلع) بإحداثيات lon/lat متتالية (بوحدات قارمن الخام). */
-class GLine(val lons: IntArray, val lats: IntArray, val isPolygon: Boolean)
+class GLine(val lons: IntArray, val lats: IntArray, val isPolygon: Boolean, val typ: Int = 0)
+
+/** نتيجة فك خط واحد: الإحداثيات + عدد البايتات المستهلكة + رمز النوع الحقيقي (بعد إزالة بتَي الأعلام). */
+class PolyResult(val lons: IntArray, val lats: IntArray, val consumed: Int, val typ: Int)
 
 class GPoint(val lon: Int, val lat: Int, val label: String? = null)
 
@@ -258,7 +261,7 @@ class GarminTile(private val img: GarminImg, private val baseName: String) {
         while (pos < end && guard < 2000) {
             guard++
             val res = decodeOnePolyline(rgn, pos, end, sub.lon, sub.lat) ?: break
-            val (lons, lats, consumed) = res
+            val lons = res.lons; val lats = res.lats; val consumed = res.consumed
             var ok = true
             for (i in lons.indices) {
                 val dl = lons[i] - sub.lon
@@ -268,7 +271,7 @@ class GarminTile(private val img: GarminImg, private val baseName: String) {
                 ) { ok = false; break }
             }
             if (ok && lons.size >= 2) {
-                out.lines.add(GLine(lons, lats, isPolygon = sub.hasPoly && !sub.hasLine))
+                out.lines.add(GLine(lons, lats, isPolygon = sub.hasPoly && !sub.hasLine, typ = res.typ))
             }
             if (consumed <= 0) break
             pos += consumed
@@ -321,7 +324,7 @@ class GarminTile(private val img: GarminImg, private val baseName: String) {
     }
 
     /** يفكّ سجل خط واحد بدءاً من [off]. يُرجع (lons, lats, عدد البايتات المستهلكة) أو null. */
-    private fun decodeOnePolyline(b: ByteArray, off: Int, end: Int, centerLon: Int, centerLat: Int): Triple<IntArray, IntArray, Int>? {
+    private fun decodeOnePolyline(b: ByteArray, off: Int, end: Int, centerLon: Int, centerLat: Int): PolyResult? {
         if (off + 8 > end) return null
         val typ = b[off].toInt() and 0xFF
         val lblRaw = (b[off + 1].toInt() and 0xFF) or ((b[off + 2].toInt() and 0xFF) shl 8) or ((b[off + 3].toInt() and 0xFF) shl 16)
@@ -343,7 +346,7 @@ class GarminTile(private val img: GarminImg, private val baseName: String) {
         val bitstreamEnd = minOf(p + length, end)
         val totalConsumed = (bitstreamEnd - off)
         if (bitstreamEnd <= bitstreamStart) {
-            return Triple(intArrayOf(centerLon + dlon0), intArrayOf(centerLat + dlat0), totalConsumed)
+            return PolyResult(intArrayOf(centerLon + dlon0), intArrayOf(centerLat + dlat0), totalConsumed, typ and 0x7F)
         }
         val base = b[bitstreamStart].toInt() and 0xFF
         val lonBase = base and 0x0F
@@ -398,7 +401,7 @@ class GarminTile(private val img: GarminImg, private val baseName: String) {
             lonsList.add(centerLon + curLon)
             latsList.add(centerLat + curLat)
         }
-        return Triple(lonsList.toIntArray(), latsList.toIntArray(), totalConsumed)
+        return PolyResult(lonsList.toIntArray(), latsList.toIntArray(), totalConsumed, typ and 0x7F)
     }
 }
 
@@ -472,13 +475,39 @@ class GarminMap(private val path: String? = null) {
     val centerLon: Int get() = if (tiles.isEmpty()) 0 else (east + west) / 2
     val centerLat: Int get() = if (tiles.isEmpty()) 0 else (north + south) / 2
 
-    /** يفكّ كل الطرق/المضلعات ضمن نافذة عرض جغرافية (بوحدات قارمن الخام)، بحد أقصى [maxLines] خط. */
+    /**
+     * يفكّ كل الطرق/المضلعات ضمن نافذة عرض جغرافية (بوحدات قارمن الخام)، بحد أقصى [maxLines] خط.
+     *
+     * كانت هذه الدالة سابقاً تستخدم دائماً أعمق مستوى تفصيل متاح (deepestLevelIdx) بصرف
+     * النظر عن مدى اتساع نافذة العرض الحالية. الخريطة الحقيقية تحتوي عادة ٦-٧ مستويات،
+     * وأعمقها يضم وحده أكثر من ٩٦٪ من كل التقسيمات الفرعية (تحقّق تجريبي: ٦٢ ألف من
+     * أصل ٦٤ ألف تقريباً في إحدى القطع). فعند التصغير (نافذة عرض واسعة)، كانت آلاف
+     * التقسيمات الدقيقة تُفكّ دفعة واحدة فتتجاوز سقف [maxLines] بسرعة وتُقطَع النتيجة
+     * بشكل عشوائي (يبدو "مشوّشاً" أو غير مكتمل)، بينما عند مناطق معيّنة من التكبير
+     * القريب قد لا تحتوي التقسيمة الدقيقة المطابقة على بيانات فتختفي الخطوط تماماً.
+     *
+     * الحل: لكل قطعة خريطة، اختيار أدقّ مستوى يبقى عدد تقسيماته المتقاطعة مع نافذة
+     * العرض ضمن حدٍّ معقول، بدءاً من الأدق والتراجع نحو الأخشن عند الحاجة. هذا يتكيّف
+     * تلقائياً مع أي خريطة (بصرف النظر عن عدد مستوياتها الفعلي) ويحل اختفاء/تشوّش الخطوط
+     * معاً لأنه يمنع إغراق سقف [maxLines] بتقسيمات دقيقة لا داعي لها عند رؤية واسعة.
+     */
     fun decodeVisible(lonMin: Int, lonMax: Int, latMin: Int, latMax: Int, maxLines: Int): DecodedFeatures {
         val out = DecodedFeatures()
+        val maxSubsPerTile = 1500
         for (tile in tiles) {
-            val li = tile.deepestLevelIdx()
-            if (li < 0) continue
-            val subsInLevel = tile.subdivisions.filter { it.levelIdx == li }
+            if (tile.levels.isEmpty()) continue
+            var chosenLevel = -1
+            var subsInLevel: List<Subdivision> = emptyList()
+            for (li in tile.levels.indices.reversed()) {
+                val candidates = tile.subdivisions.filter { it.levelIdx == li }
+                val intersecting = candidates.count { it.intersects(lonMin, lonMax, latMin, latMax) }
+                if (intersecting == 0) continue
+                chosenLevel = li
+                subsInLevel = candidates
+                if (intersecting <= maxSubsPerTile) break
+                // وإلا جرّب مستوى أخشن (أقل تفصيلاً) إن وُجد؛ إن كان هذا أخشن مستوى أصلاً، اكتفِ به.
+            }
+            if (chosenLevel < 0) continue
             for ((idx, sub) in subsInLevel.withIndex()) {
                 if (out.lines.size >= maxLines) return out
                 if (!sub.intersects(lonMin, lonMax, latMin, latMax)) continue

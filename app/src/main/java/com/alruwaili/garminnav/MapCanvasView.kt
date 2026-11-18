@@ -71,6 +71,21 @@ class MapCanvasView(ctx: Context) : View(ctx) {
         style = Paint.Style.STROKE
         strokeWidth = 3f
     }
+    // أودية/مجاري مائية (رمز النوع ٠x18 «مجرى مائي رفيع»، ٠x1f «نهر»، ٠x26 «نهر متقطع» —
+    // تم التحقق من وجودها فعلياً في بيانات خريطتك: ٥٨٩٢ خطاً بالرمز ٠x18 وحده، منطقي جداً
+    // لشبكة الشعاب الكثيفة في منطقة صحراوية) — تُرسم بلون أزرق مائي بدل اللون العام للطرق.
+    private val wadiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#3C78A8")
+        style = Paint.Style.STROKE
+        strokeWidth = 3f
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+    // مضلعات مائية (نهر ٠x46، بحيرة ٠x3c، نهر/بحيرة متقطعة ٠x4c) — تعبئة زرقاء شبه شفافة.
+    private val waterPolyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(130, 60, 120, 168)
+        style = Paint.Style.FILL
+    }
     private val poiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#B8441C")
         style = Paint.Style.FILL
@@ -259,7 +274,15 @@ class MapCanvasView(ctx: Context) : View(ctx) {
                 path.reset()
                 path.moveTo(px(line.lons[0]), py(line.lats[0]))
                 for (i in 1 until line.lons.size) path.lineTo(px(line.lons[i]), py(line.lats[i]))
-                c.drawPath(path, if (line.isPolygon) polygonPaint else roadPaint)
+                val isWadiLine = !line.isPolygon && (line.typ == 0x18 || line.typ == 0x1f || line.typ == 0x26)
+                val isWaterPoly = line.isPolygon && (line.typ == 0x46 || line.typ == 0x3c || line.typ == 0x4c)
+                val paint = when {
+                    isWadiLine -> wadiPaint
+                    isWaterPoly -> waterPolyPaint
+                    line.isPolygon -> polygonPaint
+                    else -> roadPaint
+                }
+                c.drawPath(path, paint)
             }
             var labelsDrawn = 0
             val showLabels = zoomLevel >= 5
