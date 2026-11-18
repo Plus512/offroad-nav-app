@@ -2,6 +2,7 @@ package com.alruwaili.garminnav
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -15,10 +16,14 @@ import android.location.LocationManager
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.roundToInt
 
 private const val REQ_MENU = 3001
@@ -46,6 +51,7 @@ class MainActivity : Activity(), SensorEventListener, LocationListener {
     private var zoomLevel = 5
     private var tracking = false
     private var trackStartDistM = 0.0
+    private var trackStartMs = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -113,7 +119,8 @@ class MainActivity : Activity(), SensorEventListener, LocationListener {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQ_MENU && resultCode == Activity.RESULT_OK && data != null) {
-            // نتيجة من شاشة البحث عن اسم، مُمرَّرة عبر شاشة القائمة: انتقل إلى الموقع المختار.
+            // نتيجة من شاشة البحث عن اسم أو النقاط المحفوظة، مُمرَّرة عبر شاشة القائمة:
+            // انتقل إلى الموقع المختار.
             if (data.hasExtra("lon") && data.hasExtra("lat")) {
                 map.goTo(data.getIntExtra("lon", 0), data.getIntExtra("lat", 0))
             }
@@ -130,10 +137,13 @@ class MainActivity : Activity(), SensorEventListener, LocationListener {
         tracking = !tracking
         if (tracking) {
             trackStartDistM = totalDistM
+            trackStartMs = System.currentTimeMillis()
             Toast.makeText(this, "بدأ تسجيل المسار", Toast.LENGTH_SHORT).show()
         } else {
-            val d = (totalDistM - trackStartDistM) / 1000.0
-            Toast.makeText(this, String.format("انتهى المسار: %.2f كم", d), Toast.LENGTH_LONG).show()
+            val distM = totalDistM - trackStartDistM
+            SavedData.addTrack(this, trackStartMs, System.currentTimeMillis(), distM)
+            val d = distM / 1000.0
+            Toast.makeText(this, String.format("انتهى المسار: %.2f كم — تم الحفظ في «المسارات»", d), Toast.LENGTH_LONG).show()
         }
     }
 
@@ -191,8 +201,32 @@ class MainActivity : Activity(), SensorEventListener, LocationListener {
         return col
     }
 
+    /**
+     * يحفظ موقعك الحالي كنقطة مسمّاة (فكرة مأخوذة من "وضع علامة" في أجهزة قارمن):
+     * يطلب اسماً مقترحاً (الوقت الحالي)، ويحفظه عبر SavedData ليظهر لاحقاً في
+     * شاشة «النقاط المحفوظة» من القائمة الرئيسية.
+     */
     private fun markWaypoint() {
-        // حفظ نقطة الموقع الحالي — لاحقاً يُربط بقاعدة بيانات نقاط محفوظة.
+        val fix = map.currentFix()
+        if (fix == null) {
+            Toast.makeText(this, "لا يوجد تحديد موقع بعد — انتظر إشارة GPS", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val (lon, lat) = fix
+        val input = EditText(this)
+        input.textDirection = View.TEXT_DIRECTION_RTL
+        input.setText("نقطة ${SimpleDateFormat("HH:mm", Locale.US).format(Date())}")
+
+        AlertDialog.Builder(this)
+            .setTitle("حفظ نقطة")
+            .setView(input)
+            .setPositiveButton("حفظ") { _, _ ->
+                val name = input.text.toString().trim()
+                SavedData.addPoint(this, name, lon, lat)
+                Toast.makeText(this, "تم حفظ النقطة", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("إلغاء", null)
+            .show()
     }
 
     // ---------- الأذونات والموقع ----------

@@ -256,6 +256,16 @@ class MapCanvasView(ctx: Context) : View(ctx) {
         requestDecode()
     }
 
+    /**
+     * آخر إحداثي GPS مؤكَّد، بوحدات قارمن الخام (نفس وحدات goTo/centerLon/centerLat)،
+     * أو null إن لم تُستقبل أي إشارة بعد — تستخدمه شاشات مثل «وضع علامة» و«الطوارئ».
+     */
+    fun currentFix(): Pair<Int, Int>? {
+        val lon = lastFixLon
+        val lat = lastFixLat
+        return if (lon != null && lat != null) lon to lat else null
+    }
+
     override fun onDraw(c: Canvas) {
         c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bg)
 

@@ -41,5 +41,30 @@
             android:exported="false"
             android:screenOrientation="fullUser" />
 
+        <activity
+            android:name=".CompassActivity"
+            android:exported="false"
+            android:screenOrientation="fullUser" />
+
+        <activity
+            android:name=".SatellitesActivity"
+            android:exported="false"
+            android:screenOrientation="fullUser" />
+
+        <activity
+            android:name=".SavedPointsActivity"
+            android:exported="false"
+            android:screenOrientation="fullUser" />
+
+        <activity
+            android:name=".TracksActivity"
+            android:exported="false"
+            android:screenOrientation="fullUser" />
+
+        <activity
+            android:name=".EmergencyActivity"
+            android:exported="false"
+            android:screenOrientation="fullUser" />
+
     </application>
 </manifest>

@@ -23,6 +23,7 @@ import java.net.URL
 private const val REQ_IMPORT_MAP = 2001
 private const val REQ_PICK_FOLDER = 2002
 private const val REQ_SEARCH = 2003
+private const val REQ_POINTS = 2004
 
 /**
  * رابط ملف خريطتك على GitHub (raw).
@@ -135,8 +136,11 @@ class MenuActivity : Activity() {
         cell.setOnClickListener {
             when (label) {
                 "الإعدادات" -> startActivity(Intent(this, SettingsActivity::class.java))
-                "الطوارئ", "الأقمار الصناعية", "البوصلة", "المسارات", "النقاط المحفوظة" ->
-                    Toast.makeText(this, "$label — قيد الإنشاء", Toast.LENGTH_SHORT).show()
+                "البوصلة" -> startActivity(Intent(this, CompassActivity::class.java))
+                "الأقمار الصناعية" -> startActivity(Intent(this, SatellitesActivity::class.java))
+                "الطوارئ" -> startActivity(Intent(this, EmergencyActivity::class.java))
+                "المسارات" -> startActivity(Intent(this, TracksActivity::class.java))
+                "النقاط المحفوظة" -> startActivityForResult(Intent(this, SavedPointsActivity::class.java), REQ_POINTS)
                 "بحث عن موقع" -> {
                     if (MapRepository.map == null) {
                         Toast.makeText(this, "لم تُحمَّل خريطة بعد — استورد أو نزّل الخريطة أولاً", Toast.LENGTH_LONG).show()
@@ -273,8 +277,8 @@ class MenuActivity : Activity() {
                     Toast.makeText(this, "لم يُختر مجلد — تم إلغاء العملية", Toast.LENGTH_SHORT).show()
                 }
             }
-            REQ_SEARCH -> {
-                // نتيجة البحث عن اسم: نمررها للأعلى (شاشة الخريطة) دون أي تغيير.
+            REQ_SEARCH, REQ_POINTS -> {
+                // نتيجة البحث عن اسم أو اختيار نقطة محفوظة: نمررها للأعلى (شاشة الخريطة) دون أي تغيير.
                 if (resultCode == Activity.RESULT_OK && data != null) {
                     setResult(Activity.RESULT_OK, data)
                     finish()
