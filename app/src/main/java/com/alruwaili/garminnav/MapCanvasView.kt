@@ -103,6 +103,37 @@ class MapCanvasView(ctx: Context) : View(ctx) {
     private var panY = 0f
     private var scaleAccum = 1f
 
+    // خط المسار (نقاط GPS بوحدات قارمن الخام) — إما مسار يُسجَّل الآن مباشرة، أو
+    // مسار محفوظ سابقاً يُعرض للاستعراض؛ يُرسم بنفس الطريقة في الحالتين.
+    private val trackPoints = mutableListOf<Pair<Int, Int>>()
+    private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#D1374A")
+        style = Paint.Style.STROKE
+        strokeWidth = 7f
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+
+    // ---------- «إلى أين؟» (الوجهة المختارة بالّمس أو بالبحث) ----------
+    // الفكرة مأخوذة من شاشة Where To? في قارمن (نفس الاسم الظاهر فعلياً داخل
+    // ملف APK الذي فحصناه)، بشيفرة ورسم أصليين بالكامل: خط متقطّع من موقعك
+    // الحالي إلى الوجهة، وعلامة مثلّثة عندها، وبطاقة المسافة تُحدَّثها الشاشة الرئيسية.
+    private var destLon: Int? = null
+    private var destLat: Int? = null
+    private val destPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#2E6DB4")
+        style = Paint.Style.FILL
+    }
+    private val destLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#2E6DB4")
+        style = Paint.Style.STROKE
+        strokeWidth = 5f
+        pathEffect = android.graphics.DashPathEffect(floatArrayOf(22f, 16f), 0f)
+    }
+
+    /** يُستدعى عند لمس الخريطة لمسة واحدة (ليس سحباً ولا تكبيراً)، بموقع اللمس بوحدات قارمن الخام. */
+    var onMapTap: ((lon: Int, lat: Int) -> Unit)? = null
+
     // ---------- بيانات الخريطة الحقيقية (قارمن .img) ----------
     private var garminMap: GarminMap? = null
     @Volatile private var decoded: DecodedFeatures? = null
@@ -200,7 +231,29 @@ class MapCanvasView(ctx: Context) : View(ctx) {
             requestDecode()
             return true
         }
+
+        // لمسة واحدة سريعة (ليست سحباً): حوّل موقعها على الشاشة إلى إحداثي خريطة
+        // حقيقي وأبلغ المستدعي (الشاشة الرئيسية) عبر onMapTap، التي تعرض عندها
+        // قائمة «إلى أين؟ / حفظ نقطة هنا / تفاصيل الموقع» بأسلوب قارمن.
+        override fun onSingleTapUp(e: MotionEvent): Boolean {
+            onMapTap?.invoke(screenToLon(e.x), screenToLat(e.y))
+            return true
+        }
     })
+
+    /** يحوّل إحداثي بكسل على الشاشة (مثل موقع اللمس) إلى خط طول بوحدات قارمن الخام. */
+    private fun screenToLon(x: Float): Int {
+        val upp = unitsPerPixel()
+        val cx0 = width / 2f + panX
+        return centerLon + ((x - cx0) * upp).toInt()
+    }
+
+    /** يحوّل إحداثي بكسل على الشاشة (مثل موقع اللمس) إلى خط عرض بوحدات قارمن الخام. */
+    private fun screenToLat(y: Float): Int {
+        val upp = unitsPerPixel()
+        val cy0 = height / 2f + panY
+        return centerLat - ((y - cy0) * upp).toInt()
+    }
 
     private val scaleDetector = ScaleGestureDetector(ctx, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
@@ -266,18 +319,63 @@ class MapCanvasView(ctx: Context) : View(ctx) {
         return if (lon != null && lat != null) lon to lat else null
     }
 
+    /** يبدأ تسجيل مسار جديد: يمسح أي خط سابق ويبدأ تجميع نقاط جديدة مع كل تحديث GPS. */
+    fun startNewTrack() {
+        trackPoints.clear()
+        invalidate()
+    }
+
+    /** يضيف نقطة GPS جديدة لخط المسار الجاري تسجيله الآن (يُستدعى من onLocation). */
+    fun addTrackPoint(lon: Int, lat: Int) {
+        trackPoints.add(lon to lat)
+        invalidate()
+    }
+
+    /** يحدِّد وجهة «إلى أين؟» الحالية (بوحدات قارمن الخام) لرسم الخط والعلامة إليها. */
+    fun setDestination(lon: Int, lat: Int) {
+        destLon = lon
+        destLat = lat
+        invalidate()
+    }
+
+    /** يلغي الوجهة الحالية (زر «إيقاف» في الشاشة الرئيسية). */
+    fun clearDestination() {
+        destLon = null
+        destLat = null
+        invalidate()
+    }
+
+    /** الوجهة الحالية بوحدات قارمن الخام، أو null إن لم تُحدَّد وجهة. */
+    fun currentDestination(): Pair<Int, Int>? {
+        val lon = destLon
+        val lat = destLat
+        return if (lon != null && lat != null) lon to lat else null
+    }
+
+    /** يعرض مساراً محفوظاً سابقاً (بدل التسجيل المباشر) ويتوسّط العرض على بدايته. */
+    fun showSavedTrack(points: List<Pair<Int, Int>>) {
+        trackPoints.clear()
+        trackPoints.addAll(points)
+        if (points.isNotEmpty()) {
+            goTo(points.first().first, points.first().second)
+        }
+        invalidate()
+    }
+
     override fun onDraw(c: Canvas) {
         c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bg)
+
+        // إحداثيات تحويل الخريطة إلى بكسل الشاشة — تُحسب دائماً (حتى بلا خريطة محمَّلة)
+        // لأن خط المسار وسهم المركبة يُرسمان بغضّ النظر عن توفّر بيانات الطرق.
+        val upp = unitsPerPixel()
+        val cx0 = width / 2f + panX
+        val cy0 = height / 2f + panY
+        fun px(lon: Int): Float = cx0 + ((lon - centerLon) / upp).toFloat()
+        fun py(lat: Int): Float = cy0 - ((lat - centerLat) / upp).toFloat()
 
         val gm = garminMap
         val feats = decoded
         if (gm != null && feats != null) {
-            val upp = unitsPerPixel()
-            val cx0 = width / 2f + panX
-            val cy0 = height / 2f + panY
-            fun px(lon: Int): Float = cx0 + ((lon - centerLon) / upp).toFloat()
-            fun py(lat: Int): Float = cy0 - ((lat - centerLat) / upp).toFloat()
-
             val path = android.graphics.Path()
             for (line in feats.lines) {
                 if (line.lons.isEmpty()) continue
@@ -295,7 +393,7 @@ class MapCanvasView(ctx: Context) : View(ctx) {
                 c.drawPath(path, paint)
             }
             var labelsDrawn = 0
-            val showLabels = zoomLevel >= 5
+            val showLabels = zoomLevel >= 5 || Prefs.alwaysLabels(context)
             for (pt in feats.points) {
                 val x = px(pt.lon); val y = py(pt.lat)
                 c.drawCircle(x, y, 5f, poiPaint)
@@ -323,6 +421,39 @@ class MapCanvasView(ctx: Context) : View(ctx) {
             c.drawText("تعذّر قراءة ملف الخريطة", width / 2f, height / 2f - 60f, msgPaint)
         } else if (gm != null && feats == null) {
             c.drawText("جارٍ تحميل الخريطة…", width / 2f, height / 2f - 60f, msgPaint)
+        }
+
+        // خط المسار (تسجيل مباشر أو مسار محفوظ معروض للاستعراض) — يُرسم بغضّ النظر
+        // عن توفّر بيانات الطرق، لأن px/py محسوبتان دائماً أعلاه.
+        if (trackPoints.size >= 2) {
+            val tPath = android.graphics.Path()
+            tPath.moveTo(px(trackPoints[0].first), py(trackPoints[0].second))
+            for (i in 1 until trackPoints.size) {
+                tPath.lineTo(px(trackPoints[i].first), py(trackPoints[i].second))
+            }
+            c.drawPath(tPath, trackPaint)
+        }
+
+        // خط ومعلم «إلى أين؟»: يُرسم الخط فقط إن توفّر تحديد GPS حالي (لنعرف من أين
+        // نبدأ)، بينما تظهر العلامة عند الوجهة بغضّ النظر عن توفّر الإشارة.
+        val dLon = destLon
+        val dLat = destLat
+        if (dLon != null && dLat != null) {
+            val fLon = lastFixLon
+            val fLat = lastFixLat
+            if (fLon != null && fLat != null) {
+                c.drawLine(px(fLon), py(fLat), px(dLon), py(dLat), destLinePaint)
+            }
+            val dx = px(dLon); val dy = py(dLat)
+            val dr = minOf(width, height) * 0.03f
+            val flag = android.graphics.Path()
+            flag.moveTo(dx, dy)
+            flag.lineTo(dx, dy - dr * 2.2f)
+            flag.lineTo(dx + dr * 1.4f, dy - dr * 1.7f)
+            flag.lineTo(dx, dy - dr * 1.2f)
+            flag.close()
+            c.drawPath(flag, destPaint)
+            c.drawCircle(dx, dy, dr * 0.35f, destPaint)
         }
 
         // سهم المركبة في وسط الشاشة افتراضياً، يتحرك مع السحب بالإصبع ويدور مع اتجاه السير.

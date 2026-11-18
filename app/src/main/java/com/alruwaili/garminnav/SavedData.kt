@@ -15,6 +15,10 @@ data class TrackSession(val startMs: Long, val endMs: Long, val distanceM: Doubl
  * التطبيق، ويُحذف فقط إذا حُذف التطبيق نفسه — وهذا مقبول لهذه البيانات، بخلاف ملف
  * الخريطة نفسه الذي يُحفظ في مجلد خارجي دائم عبر MapStorage.
  *
+ * كل مسار يُخزَّن بسجل ملخّص واحد في tracks.txt (البداية/النهاية/المسافة)، بالإضافة
+ * إلى ملف منفصل يحمل كل نقاط المسار الفعلية (خط طول/عرض لكل نقطة GPS التُقطت أثناء
+ * التسجيل) باسم مبني من وقت البداية — هذا ما يسمح برسم خط المسار لاحقاً عند استعراضه.
+ *
  * فكرة الشاشتين («النقاط المحفوظة» و«المسارات») مأخوذة من شاشتي MyLocationsActivity
  * وTracks في تطبيق قارمن، لكن بتخزين وشيفرة مكتوبين من الصفر خصيصاً لهذا التطبيق.
  */
@@ -22,6 +26,7 @@ object SavedData {
 
     private fun pointsFile(ctx: Context) = File(ctx.filesDir, "saved_points.txt")
     private fun tracksFile(ctx: Context) = File(ctx.filesDir, "tracks.txt")
+    private fun trackPointsFile(ctx: Context, startMs: Long) = File(ctx.filesDir, "track_points_$startMs.txt")
 
     @Synchronized
     fun addPoint(ctx: Context, name: String, lon: Int, lat: Int) {
@@ -60,10 +65,17 @@ object SavedData {
         f.writeText(if (remaining.isEmpty()) "" else remaining.joinToString("\n") + "\n")
     }
 
+    /** يحفظ ملخّص المسار، وإن توفّرت نقاط فعلية (خط سير GPS) يحفظها في ملف منفصل لعرضها لاحقاً. */
     @Synchronized
-    fun addTrack(ctx: Context, startMs: Long, endMs: Long, distanceM: Double) {
-        val line = "$startMs|$endMs|$distanceM\n"
-        tracksFile(ctx).appendText(line)
+    fun addTrack(ctx: Context, startMs: Long, endMs: Long, distanceM: Double, points: List<Pair<Int, Int>>) {
+        tracksFile(ctx).appendText("$startMs|$endMs|$distanceM\n")
+        if (points.isNotEmpty()) {
+            val sb = StringBuilder()
+            for ((lon, lat) in points) {
+                sb.append(lon).append(',').append(lat).append('\n')
+            }
+            trackPointsFile(ctx, startMs).writeText(sb.toString())
+        }
     }
 
     @Synchronized
@@ -79,5 +91,21 @@ object SavedData {
                 null
             }
         }.sortedByDescending { it.startMs }
+    }
+
+    /** يقرأ نقاط مسار محدَّد (بوحدات قارمن الخام) لرسمه على الخريطة؛ قائمة فارغة إن لم تُحفظ نقاط له. */
+    @Synchronized
+    fun loadTrackPoints(ctx: Context, startMs: Long): List<Pair<Int, Int>> {
+        val f = trackPointsFile(ctx, startMs)
+        if (!f.exists()) return emptyList()
+        return f.readLines().mapNotNull { line ->
+            val parts = line.split(",")
+            if (parts.size != 2) return@mapNotNull null
+            try {
+                parts[0].toInt() to parts[1].toInt()
+            } catch (e: Exception) {
+                null
+            }
+        }
     }
 }

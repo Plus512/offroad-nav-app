@@ -1,6 +1,7 @@
 package com.alruwaili.garminnav
 
 import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
 import android.text.format.DateFormat
 import android.view.Gravity
@@ -12,7 +13,8 @@ import java.util.Date
 
 /**
  * قائمة المسارات المسجَّلة سابقاً (الفكرة مأخوذة من شاشة Tracks في قارمن،
- * شيفرة أصلية بالكامل): تاريخ البدء، المدة، والمسافة لكل مسار.
+ * شيفرة أصلية بالكامل): تاريخ البدء، المدة، والمسافة لكل مسار. الضغط على مسار
+ * يُرجع وقت بدايته (معرِّفه) للشاشة الرئيسية لتعرض خطّه على الخريطة.
  */
 class TracksActivity : Activity() {
 
@@ -82,12 +84,18 @@ class TracksActivity : Activity() {
         row.addView(dateTv)
 
         val durationMin = (t.endMs - t.startMs) / 60000.0
-        val distKm = t.distanceM / 1000.0
         val infoTv = TextView(this)
-        infoTv.text = String.format("المسافة: %.2f كم — المدة: %.0f دقيقة", distKm, durationMin)
+        infoTv.text = "المسافة: ${Prefs.formatDistance(this, t.distanceM)} — المدة: ${String.format("%.0f دقيقة", durationMin)}"
         infoTv.textSize = 13f
         infoTv.setTextColor(GTheme.MUTED)
         row.addView(infoTv)
+
+        row.setOnClickListener {
+            val data = Intent()
+            data.putExtra("viewTrackStartMs", t.startMs)
+            setResult(Activity.RESULT_OK, data)
+            finish()
+        }
 
         return row
     }

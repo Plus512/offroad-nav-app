@@ -24,6 +24,7 @@ private const val REQ_IMPORT_MAP = 2001
 private const val REQ_PICK_FOLDER = 2002
 private const val REQ_SEARCH = 2003
 private const val REQ_POINTS = 2004
+private const val REQ_TRACKS = 2005
 
 /**
  * رابط ملف خريطتك على GitHub (raw).
@@ -139,7 +140,7 @@ class MenuActivity : Activity() {
                 "البوصلة" -> startActivity(Intent(this, CompassActivity::class.java))
                 "الأقمار الصناعية" -> startActivity(Intent(this, SatellitesActivity::class.java))
                 "الطوارئ" -> startActivity(Intent(this, EmergencyActivity::class.java))
-                "المسارات" -> startActivity(Intent(this, TracksActivity::class.java))
+                "المسارات" -> startActivityForResult(Intent(this, TracksActivity::class.java), REQ_TRACKS)
                 "النقاط المحفوظة" -> startActivityForResult(Intent(this, SavedPointsActivity::class.java), REQ_POINTS)
                 "بحث عن موقع" -> {
                     if (MapRepository.map == null) {
@@ -277,8 +278,9 @@ class MenuActivity : Activity() {
                     Toast.makeText(this, "لم يُختر مجلد — تم إلغاء العملية", Toast.LENGTH_SHORT).show()
                 }
             }
-            REQ_SEARCH, REQ_POINTS -> {
-                // نتيجة البحث عن اسم أو اختيار نقطة محفوظة: نمررها للأعلى (شاشة الخريطة) دون أي تغيير.
+            REQ_SEARCH, REQ_POINTS, REQ_TRACKS -> {
+                // نتيجة البحث عن اسم، أو اختيار نقطة محفوظة، أو اختيار مسار لعرضه:
+                // نمررها للأعلى (شاشة الخريطة) دون أي تغيير.
                 if (resultCode == Activity.RESULT_OK && data != null) {
                     setResult(Activity.RESULT_OK, data)
                     finish()

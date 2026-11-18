@@ -5,10 +5,15 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
+import android.widget.Switch
 import android.widget.TextView
 import java.io.File
 
-/** شاشة إعدادات حقيقية وبسيطة: حالة الخريطة ومعلومات التطبيق. */
+/**
+ * شاشة إعدادات حقيقية وفعّالة: كل مفتاح هنا يُطبَّق فوراً (عبر Prefs) في الشاشة
+ * الرئيسية وشاشة الخريطة دون الحاجة لإعادة تشغيل التطبيق، بالإضافة لمعلومات
+ * الخريطة والتطبيق كما كانت.
+ */
 class SettingsActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -21,6 +26,16 @@ class SettingsActivity : Activity() {
         root.setPadding(dp(30), dp(50), dp(30), dp(30))
 
         root.addView(title("الإعدادات"))
+
+        root.addView(switchRow("وحدة المسافة: ميل بدل كيلومتر", Prefs.unitMiles(this)) {
+            Prefs.setUnitMiles(this, it)
+        })
+        root.addView(switchRow("إبقاء الشاشة مضاءة أثناء استخدام التطبيق", Prefs.keepScreenOn(this)) {
+            Prefs.setKeepScreenOn(this, it)
+        })
+        root.addView(switchRow("إظهار أسماء المعالم في كل مستويات التكبير", Prefs.alwaysLabels(this)) {
+            Prefs.setAlwaysLabels(this, it)
+        })
 
         val mapFile = File(filesDir, "maps/almisharIMAP.img")
         val mapStatus = if (mapFile.exists())
@@ -47,6 +62,34 @@ class SettingsActivity : Activity() {
         tv.gravity = Gravity.CENTER
         tv.setPadding(0, 0, 0, dp(40))
         return tv
+    }
+
+    /** صف مفتاح تشغيل/إيقاف يُطبِّق التغيير فوراً عبر [onChange] عند كل تبديل. */
+    private fun switchRow(label: String, initial: Boolean, onChange: (Boolean) -> Unit): LinearLayout {
+        val r = LinearLayout(this)
+        r.orientation = LinearLayout.HORIZONTAL
+        r.layoutDirection = View.LAYOUT_DIRECTION_RTL
+        r.setBackgroundColor(GTheme.BAR_BG)
+        r.gravity = Gravity.CENTER_VERTICAL
+        r.setPadding(dp(20), dp(18), dp(20), dp(18))
+        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        lp.setMargins(0, 0, 0, dp(10))
+        r.layoutParams = lp
+
+        val l = TextView(this)
+        l.text = label
+        l.textDirection = View.TEXT_DIRECTION_RTL
+        l.textSize = 16f
+        l.setTextColor(GTheme.TEXT)
+        l.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+
+        val sw = Switch(this)
+        sw.isChecked = initial
+        sw.setOnCheckedChangeListener { _, checked -> onChange(checked) }
+
+        r.addView(l)
+        r.addView(sw)
+        return r
     }
 
     private fun row(label: String, value: String): LinearLayout {
