@@ -23,7 +23,7 @@ class GarminSubfile(
     val clusters: List<Int>,
 )
 
-class GarminImg(private val path: String) {
+class GarminImg(private val path: String? = null) {
 
     lateinit var raw: ByteArray
         private set
@@ -32,12 +32,26 @@ class GarminImg(private val path: String) {
 
     val subfiles = LinkedHashMap<String, GarminSubfile>() // key = "NAME.EXT"
 
+    /** يفتح الملف من مسار ملف عادي (File) — الأسلوب الأصلي. */
     fun open() {
         val f = RandomAccessFile(path, "r")
         val data = ByteArray(f.length().toInt())
         f.readFully(data)
         f.close()
+        parseRaw(data)
+    }
 
+    /**
+     * يفتح الملف من أي مجرى بيانات (InputStream) — يُستخدم عند القراءة من مجلد
+     * محفوظ عبر SAF (Storage Access Framework)، حيث لا يوجد مسار ملف مباشر.
+     * يقرأ المحتوى كاملاً إلى الذاكرة تماماً كما يفعل open() بالضبط.
+     */
+    fun openFromStream(input: java.io.InputStream) {
+        val data = input.readBytes()
+        parseRaw(data)
+    }
+
+    private fun parseRaw(data: ByteArray) {
         val xor = data[0].toInt() and 0xFF
         val buf = if (xor != 0) {
             ByteArray(data.size) { i -> (data[i].toInt() xor xor).toByte() }

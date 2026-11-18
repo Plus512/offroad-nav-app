@@ -32,6 +32,10 @@ class MapCanvasView(ctx: Context) : View(ctx) {
     var mapLoaded: Boolean = false
         set(v) { field = v; invalidate() }
 
+    /** true أثناء قراءة وفك ملف الخريطة في الخلفية (قد يستغرق وقتاً لملف كبير). */
+    var mapLoading: Boolean = false
+        set(v) { field = v; invalidate() }
+
     /** مستوى التكبير (١ أبعد ← ١٠ أقرب). */
     var zoomLevel: Int = 5
         set(v) { field = v; invalidate(); requestDecode() }
@@ -95,26 +99,46 @@ class MapCanvasView(ctx: Context) : View(ctx) {
     /** وحدات قارمن الخام لكل بكسل حسب مستوى التكبير (١=الأبعد، ١٠=الأقرب). */
     private fun unitsPerPixel(): Double = 16.0 * Math.pow(2.0, (5 - zoomLevel).toDouble())
 
-    /** يحمّل ملف قارمن .img في خيط خلفي ثم يعرض المحتوى عند الانتهاء. */
+    /** يحمّل ملف قارمن .img من مسار مباشر (الأسلوب القديم)، في خيط خلفي. */
     fun loadGarminMap(path: String) {
+        loadGarminMapCommon { GarminMap(path).also { it.open() } }
+    }
+
+    /**
+     * يحمّل ملف قارمن .img من أي مصدر (مجرى بيانات)، في خيط خلفي — يُستخدم عند
+     * القراءة من مجلد محفوظ عبر SAF (حيث لا يوجد مسار ملف مباشر). [openStream]
+     * يُستدعى في الخيط الخلفي نفسه ويُغلق تلقائياً بعد القراءة.
+     */
+    fun loadGarminMapFromStream(openStream: () -> java.io.InputStream) {
+        loadGarminMapCommon {
+            val m = GarminMap()
+            openStream().use { m.openFromStream(it) }
+            m
+        }
+    }
+
+    private fun loadGarminMapCommon(opener: () -> GarminMap) {
         mapLoadFailed = false
+        mapLoading = true
         thread {
             try {
-                val m = GarminMap(path)
-                m.open()
+                val m = opener()
                 if (m.tiles.isEmpty()) {
-                    post { mapLoadFailed = true; invalidate() }
+                    post { mapLoading = false; mapLoadFailed = true; invalidate() }
                     return@thread
                 }
                 garminMap = m
+                MapRepository.map = m
+                MapRepository.labelIndex = null
                 post {
                     centerLon = m.centerLon
                     centerLat = m.centerLat
+                    mapLoading = false
                     mapLoaded = true
                     scheduleDecode()
                 }
             } catch (e: Exception) {
-                post { mapLoadFailed = true; invalidate() }
+                post { mapLoading = false; mapLoadFailed = true; invalidate() }
             }
         }
     }
@@ -206,6 +230,17 @@ class MapCanvasView(ctx: Context) : View(ctx) {
         requestDecode()
     }
 
+    /** ينقل مركز العرض إلى موقع محدد (مثلاً نتيجة بحث)، بمعزل عن موقع GPS الحالي. */
+    fun goTo(lon: Int, lat: Int) {
+        panX = 0f
+        panY = 0f
+        centerLon = lon
+        centerLat = lat
+        if (zoomLevel < 7) zoomLevel = 7 // تكبير كافٍ لرؤية الاسم المختار بوضوح
+        invalidate()
+        requestDecode()
+    }
+
     override fun onDraw(c: Canvas) {
         c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bg)
 
@@ -247,7 +282,9 @@ class MapCanvasView(ctx: Context) : View(ctx) {
             while (x < width) { c.drawLine(x, 0f, x, height.toFloat(), gridPaint); x += stepF }
         }
 
-        if (!mapLoaded) {
+        if (mapLoading) {
+            c.drawText("جارٍ قراءة ملف الخريطة… قد يستغرق بعض الوقت", width / 2f, height / 2f - 60f, msgPaint)
+        } else if (!mapLoaded) {
             c.drawText("لم تُستورد خريطة بعد — اضغط «استيراد خريطة» من القائمة", width / 2f, height / 2f - 60f, msgPaint)
         } else if (mapLoadFailed) {
             c.drawText("تعذّر قراءة ملف الخريطة", width / 2f, height / 2f - 60f, msgPaint)

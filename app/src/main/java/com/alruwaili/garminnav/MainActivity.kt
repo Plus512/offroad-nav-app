@@ -19,8 +19,9 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import java.io.File
 import kotlin.math.roundToInt
+
+private const val REQ_MENU = 3001
 
 /**
  * الشاشة الرئيسية: تحاكي تشغيل جهاز قارمن مباشرة على شاشة الخريطة.
@@ -80,9 +81,10 @@ class MainActivity : Activity(), SensorEventListener, LocationListener {
         bottomLp.gravity = Gravity.BOTTOM
 
         bottomBar.addView(garminButton("☰", "القائمة") {
-            startActivity(Intent(this, MenuActivity::class.java))
+            startActivityForResult(Intent(this, MenuActivity::class.java), REQ_MENU)
         })
         bottomBar.addView(garminButton("📍", "علامة") { markWaypoint() })
+        bottomBar.addView(garminButton("🎯", "موقعي") { map.recenter() })
         bottomBar.addView(garminButton("🔍", "تكبير") { changeZoom(1) })
         bottomBar.addView(garminButton("↪", "مسار") { toggleTracking() })
         root.addView(bottomBar, bottomLp)
@@ -98,11 +100,25 @@ class MainActivity : Activity(), SensorEventListener, LocationListener {
 
     override fun onStart() {
         super.onStart()
-        // تحديث شاشة الخريطة إن عاد المستخدم من تنزيل خريطة جديدة في القائمة.
-        map.mapLoaded = mapFile().exists()
+        // عند كل رجوع إلى هذه الشاشة (مثلاً بعد تنزيل/استيراد خريطة جديدة من القائمة):
+        // إن توفّر ملف خريطة ولم يكن محمّلاً فعلياً في الذاكرة بعد (أو تغيّر)، حمّله الآن
+        // ففعلياً فك التشفير (الطرق/الأسماء) لا يحدث إلا باستدعاء هذا.
+        if (MapStorage.mapExists(this) && MapRepository.map == null) {
+            map.loadGarminMapFromStream { MapStorage.openMapInputStream(this)!! }
+        } else if (!MapStorage.mapExists(this)) {
+            map.mapLoaded = false
+        }
     }
 
-    private fun mapFile(): File = File(filesDir, "maps/almisharIMAP.img")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_MENU && resultCode == Activity.RESULT_OK && data != null) {
+            // نتيجة من شاشة البحث عن اسم، مُمرَّرة عبر شاشة القائمة: انتقل إلى الموقع المختار.
+            if (data.hasExtra("lon") && data.hasExtra("lat")) {
+                map.goTo(data.getIntExtra("lon", 0), data.getIntExtra("lat", 0))
+            }
+        }
+    }
 
     private fun changeZoom(delta: Int) {
         zoomLevel = (zoomLevel + delta).coerceIn(1, 10)

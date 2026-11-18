@@ -276,6 +276,33 @@ class GarminTile(private val img: GarminImg, private val baseName: String) {
         }
     }
 
+    /**
+     * يفكّ فقط قسم النقاط (بدون الخطوط) من تقسيمة فرعية واحدة — أخفّ وأسرع من
+     * decodeSubdivisionInto، تُستخدم لبناء فهرس الأسماء الكامل للبحث فقط (لا حاجة
+     * للطرق/المضلعات هناك).
+     */
+    fun decodePointsOnlyInto(sub: Subdivision, out: MutableList<GPoint>, subIndexInLevel: Int, subsInLevel: List<Subdivision>) {
+        if (!sub.hasPoint && !sub.hasIPoint) return
+        val start = rgnHeaderLen + sub.rgnOff
+        val end = if (subIndexInLevel + 1 < subsInLevel.size) rgnHeaderLen + subsInLevel[subIndexInLevel + 1].rgnOff else rgn.size
+        if (start >= end || end > rgn.size || start < 0) return
+
+        var p = start
+        var pointsEnd = end
+        val typeCount = (if (sub.hasPoint) 1 else 0) + (if (sub.hasIPoint) 1 else 0) +
+            (if (sub.hasLine) 1 else 0) + (if (sub.hasPoly) 1 else 0)
+        if (typeCount > 1) {
+            val ptrBytes = (typeCount - 1) * 2
+            if (p + ptrBytes > end) return
+            val rel = (rgn[p].toInt() and 0xFF) or ((rgn[p + 1].toInt() and 0xFF) shl 8)
+            pointsEnd = p + ptrBytes + rel
+            p += ptrBytes
+        }
+        val tmp = DecodedFeatures()
+        decodePointsInto(rgn, p, minOf(pointsEnd, end), sub.lon, sub.lat, tmp)
+        out.addAll(tmp.points)
+    }
+
     /** يفكّ سلسلة نقاط (POI) ضمن [start, end). كل نقطة: نوع(١) + تسمية(٣) + فرق‌طول(٢) + فرق‌عرض(٢) + [فرعي(١) إن وُجد]. */
     private fun decodePointsInto(b: ByteArray, start: Int, end: Int, centerLon: Int, centerLat: Int, out: DecodedFeatures) {
         var p = start
@@ -375,8 +402,37 @@ class GarminTile(private val img: GarminImg, private val baseName: String) {
     }
 }
 
+/** نقطة مُسمّاة واحدة في فهرس البحث الكامل (كل الخريطة، لا نافذة عرض محددة). */
+class LabeledPoint(val label: String, val lon: Int, val lat: Int)
+
+/**
+ * مرجع عام للخريطة المحمّلة حالياً في الذاكرة، وفهرس أسمائها (يُبنى مرة واحدة فقط
+ * عند الحاجة، بدلاً من إعادة قراءة ملف الخريطة البالغ ٥٥ م.ب من جديد). تستخدمه
+ * شاشة البحث (SearchActivity) للوصول لنفس النسخة التي حمّلتها شاشة الخريطة
+ * (MapCanvasView)، دون أي اعتماد بين الاثنين على واجهات أندرويد.
+ */
+object MapRepository {
+    @Volatile var map: GarminMap? = null
+    @Volatile var labelIndex: List<LabeledPoint>? = null
+
+    /** يبني فهرس الأسماء إن لم يكن مبنياً من قبل لنفس الخريطة المحمّلة حالياً. */
+    @Synchronized
+    fun ensureLabelIndex(): List<LabeledPoint> {
+        labelIndex?.let { return it }
+        val m = map ?: return emptyList()
+        val idx = m.indexAllLabeledPoints()
+        labelIndex = idx
+        return idx
+    }
+
+    fun clear() {
+        map = null
+        labelIndex = null
+    }
+}
+
 /** يجمع كل قطع الخريطة (TRE/RGN) الموجودة داخل ملف .img واحد. */
-class GarminMap(private val path: String) {
+class GarminMap(private val path: String? = null) {
     private val img = GarminImg(path)
     var tiles: List<GarminTile> = emptyList()
         private set
@@ -384,8 +440,19 @@ class GarminMap(private val path: String) {
     var north = Int.MIN_VALUE; var south = Int.MAX_VALUE; var east = Int.MIN_VALUE; var west = Int.MAX_VALUE
         private set
 
+    /** يفتح الملف من مساره المباشر (الأسلوب القديم). */
     fun open() {
         img.open()
+        afterImgOpened()
+    }
+
+    /** يفتح الملف من أي مجرى (InputStream) — يُستخدم عند القراءة من مجلد محفوظ عبر SAF. */
+    fun openFromStream(input: java.io.InputStream) {
+        img.openFromStream(input)
+        afterImgOpened()
+    }
+
+    private fun afterImgOpened() {
         val names = img.mapTileNames()
         val list = ArrayList<GarminTile>()
         for (name in names) {
@@ -416,6 +483,30 @@ class GarminMap(private val path: String) {
                 if (out.lines.size >= maxLines) return out
                 if (!sub.intersects(lonMin, lonMax, latMin, latMax)) continue
                 tile.decodeSubdivisionInto(sub, out, idx, subsInLevel)
+            }
+        }
+        return out
+    }
+
+    /**
+     * يبني فهرساً كاملاً لكل نقطة مُسمّاة في الخريطة بأكملها (للبحث عن الأسماء)،
+     * بدون فك الطرق/المضلعات (أخفّ وأسرع من decodeVisible). يُستحسن استدعاؤها مرة
+     * واحدة فقط (مثلاً في خيط عمل منفصل عند أول فتح للبحث) وتخزين النتيجة.
+     */
+    fun indexAllLabeledPoints(): List<LabeledPoint> {
+        val out = ArrayList<LabeledPoint>()
+        val tmp = ArrayList<GPoint>()
+        for (tile in tiles) {
+            val li = tile.deepestLevelIdx()
+            if (li < 0) continue
+            val subsInLevel = tile.subdivisions.filter { it.levelIdx == li }
+            for ((idx, sub) in subsInLevel.withIndex()) {
+                tmp.clear()
+                tile.decodePointsOnlyInto(sub, tmp, idx, subsInLevel)
+                for (pt in tmp) {
+                    val lbl = pt.label
+                    if (!lbl.isNullOrBlank()) out.add(LabeledPoint(lbl, pt.lon, pt.lat))
+                }
             }
         }
         return out

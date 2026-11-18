@@ -21,6 +21,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 private const val REQ_IMPORT_MAP = 2001
+private const val REQ_PICK_FOLDER = 2002
+private const val REQ_SEARCH = 2003
 
 /**
  * رابط ملف خريطتك على GitHub (raw).
@@ -39,6 +41,9 @@ class MenuActivity : Activity() {
     private lateinit var progressBar: ProgressBar
     private lateinit var progressText: TextView
     private lateinit var progressTitle: TextView
+
+    /** الإجراء المؤجَّل ريثما يختار المستخدم مجلد الحفظ الدائم ("download" أو "import"). */
+    private var pendingAction: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -130,13 +135,39 @@ class MenuActivity : Activity() {
         cell.setOnClickListener {
             when (label) {
                 "الإعدادات" -> startActivity(Intent(this, SettingsActivity::class.java))
-                "الطوارئ", "الأقمار الصناعية", "البوصلة", "المسارات", "النقاط المحفوظة", "بحث عن موقع" ->
+                "الطوارئ", "الأقمار الصناعية", "البوصلة", "المسارات", "النقاط المحفوظة" ->
                     Toast.makeText(this, "$label — قيد الإنشاء", Toast.LENGTH_SHORT).show()
-                "استيراد خريطة" -> pickMapFile()
-                "الخرائط" -> downloadMap()
+                "بحث عن موقع" -> {
+                    if (MapRepository.map == null) {
+                        Toast.makeText(this, "لم تُحمَّل خريطة بعد — استورد أو نزّل الخريطة أولاً", Toast.LENGTH_LONG).show()
+                    } else {
+                        startActivityForResult(Intent(this, SearchActivity::class.java), REQ_SEARCH)
+                    }
+                }
+                "استيراد خريطة" -> ensureFolderThen("import")
+                "الخرائط" -> ensureFolderThen("download")
             }
         }
         return cell
+    }
+
+    /**
+     * يتأكد من وجود مجلد حفظ دائم (SAF) مُختار قبل أي تنزيل/استيراد جديد، بحيث تبقى
+     * الخريطة محفوظة حتى لو حُذف التطبيق لاحقاً. إن لم يوجد مجلد بعد، يطلب من
+     * المستخدم اختيار واحد أولاً ثم يستكمل الإجراء المطلوب تلقائياً.
+     */
+    private fun ensureFolderThen(action: String) {
+        if (MapStorage.hasPersistentFolder(this)) {
+            if (action == "download") downloadMap() else pickMapFile()
+            return
+        }
+        pendingAction = action
+        Toast.makeText(
+            this,
+            "اختر مجلداً لحفظ الخريطة فيه بشكل دائم — بهذا تبقى الخريطة موجودة حتى لو حذفت التطبيق أو حدّثته، ولن تحتاج لتنزيلها مرة أخرى",
+            Toast.LENGTH_LONG
+        ).show()
+        startActivityForResult(MapStorage.pickFolderIntent(), REQ_PICK_FOLDER)
     }
 
     // ---------- طبقة شريط التقدّم ----------
@@ -221,33 +252,57 @@ class MenuActivity : Activity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQ_IMPORT_MAP && resultCode == Activity.RESULT_OK) {
-            val uri = data?.data
-            if (uri != null) importMapFile(uri)
+        when (requestCode) {
+            REQ_IMPORT_MAP -> {
+                if (resultCode == Activity.RESULT_OK) {
+                    val uri = data?.data
+                    if (uri != null) importMapFile(uri)
+                }
+            }
+            REQ_PICK_FOLDER -> {
+                val action = pendingAction
+                pendingAction = null
+                val folderUri = data?.data
+                if (resultCode == Activity.RESULT_OK && folderUri != null) {
+                    MapStorage.onFolderPicked(this, folderUri)
+                    when (action) {
+                        "download" -> downloadMap()
+                        "import" -> pickMapFile()
+                    }
+                } else {
+                    Toast.makeText(this, "لم يُختر مجلد — تم إلغاء العملية", Toast.LENGTH_SHORT).show()
+                }
+            }
+            REQ_SEARCH -> {
+                // نتيجة البحث عن اسم: نمررها للأعلى (شاشة الخريطة) دون أي تغيير.
+                if (resultCode == Activity.RESULT_OK && data != null) {
+                    setResult(Activity.RESULT_OK, data)
+                    finish()
+                }
+            }
         }
     }
 
     private fun importMapFile(uri: Uri) {
-        val mapsDir = File(filesDir, "maps")
-        if (!mapsDir.exists()) mapsDir.mkdirs()
-        val dest = File(mapsDir, "almisharIMAP.img")
-        val tmp = File(mapsDir, "almisharIMAP.img.part")
         val main = Handler(Looper.getMainLooper())
-
         main.post { showProgress("جارٍ نسخ الخريطة من هاتفك…") }
 
         Thread {
+            var tmpUri: Uri? = null
             try {
                 val totalBytes = try {
                     contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: -1L
                 } catch (e: Exception) { -1L }
 
+                val (tUri, out) = MapStorage.createTempOutputStream(this)
+                    ?: throw Exception("تعذّر إنشاء ملف مؤقت في المجلد المحفوظ")
+                tmpUri = tUri
                 val input = contentResolver.openInputStream(uri)
                     ?: throw Exception("تعذّر فتح الملف المحدَّد")
                 var copied = 0L
                 var lastUpdate = 0L
                 input.use { inp ->
-                    tmp.outputStream().use { output ->
+                    out.use { output ->
                         val buf = ByteArray(64 * 1024)
                         while (true) {
                             val n = inp.read(buf)
@@ -262,17 +317,18 @@ class MenuActivity : Activity() {
                         }
                     }
                 }
-                if (!tmp.renameTo(dest)) throw Exception("تعذّر حفظ الملف النهائي")
+                if (!MapStorage.finalizeDownload(this, tUri)) throw Exception("تعذّر حفظ الملف النهائي")
+                MapRepository.clear()
                 main.post {
                     hideProgress()
                     Toast.makeText(
                         this,
-                        "تم استيراد الخريطة (${dest.length() / 1024 / 1024} ميجا) — الطرق لم تُفعَّل بعد",
+                        "تم استيراد الخريطة (${MapStorage.mapSizeMb(this)} ميجا) — ستبقى محفوظة حتى لو حُذف التطبيق",
                         Toast.LENGTH_LONG
                     ).show()
                 }
             } catch (e: Exception) {
-                tmp.delete()
+                tmpUri?.let { MapStorage.deleteTemp(this, it) }
                 main.post {
                     hideProgress()
                     Toast.makeText(this, "فشل الاستيراد: ${e.message}", Toast.LENGTH_LONG).show()
@@ -291,18 +347,15 @@ class MenuActivity : Activity() {
      * الفعلية منه لم يُفعَّل بعد (انظر MapCanvasView) — هذا عمل منفصل لم يكتمل.
      */
     private fun downloadMap() {
-        val mapsDir = File(filesDir, "maps")
-        if (!mapsDir.exists()) mapsDir.mkdirs()
-        val dest = File(mapsDir, "almisharIMAP.img")
-        val tmp = File(mapsDir, "almisharIMAP.img.part")
         val main = Handler(Looper.getMainLooper())
-
         main.post { showProgress("جارٍ تنزيل الخريطة…") }
 
         Thread {
             var lastError: Exception? = null
             var success = false
+            var finalMb = 0L
             for (attempt in 1..5) {
+                var tmpUri: Uri? = null
                 try {
                     val conn = URL(MAP_DOWNLOAD_URL).openConnection() as HttpURLConnection
                     conn.connectTimeout = 30000
@@ -312,10 +365,13 @@ class MenuActivity : Activity() {
                         throw Exception("رمز استجابة الخادم: ${conn.responseCode}")
                     }
                     val totalBytes = conn.contentLengthLong
+                    val (tUri, out) = MapStorage.createTempOutputStream(this)
+                        ?: throw Exception("تعذّر إنشاء ملف مؤقت في المجلد المحفوظ")
+                    tmpUri = tUri
                     var copied = 0L
                     var lastUpdate = 0L
                     conn.inputStream.use { input ->
-                        tmp.outputStream().use { output ->
+                        out.use { output ->
                             val buf = ByteArray(64 * 1024)
                             while (true) {
                                 val n = input.read(buf)
@@ -330,11 +386,14 @@ class MenuActivity : Activity() {
                             }
                         }
                     }
-                    if (!tmp.renameTo(dest)) throw Exception("تعذّر حفظ الملف النهائي")
+                    if (!MapStorage.finalizeDownload(this, tUri)) throw Exception("تعذّر حفظ الملف النهائي")
+                    MapRepository.clear()
+                    finalMb = MapStorage.mapSizeMb(this)
                     success = true
                     break
                 } catch (e: Exception) {
                     lastError = e
+                    tmpUri?.let { MapStorage.deleteTemp(this, it) }
                     if (attempt < 5) {
                         main.post {
                             progressTitle.text = "انقطع الاتصال، إعادة المحاولة (${attempt}/5)…"
@@ -348,12 +407,11 @@ class MenuActivity : Activity() {
                     hideProgress()
                     Toast.makeText(
                         this,
-                        "اكتمل التنزيل (${dest.length() / 1024 / 1024} ميجا) — الطرق لم تُفعَّل بعد",
+                        "اكتمل التنزيل ($finalMb ميجا) — ستبقى الخريطة محفوظة حتى لو حُذف التطبيق",
                         Toast.LENGTH_LONG
                     ).show()
                 }
             } else {
-                tmp.delete()
                 main.post {
                     hideProgress()
                     Toast.makeText(this, "فشل التنزيل بعد ٥ محاولات: ${lastError?.message}", Toast.LENGTH_LONG).show()
