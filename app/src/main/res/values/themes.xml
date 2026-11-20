@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Theme.DalilAlBar" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/desert_brown</item>
+        <item name="colorPrimaryVariant">@color/desert_brown</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorSecondary">@color/sand_bg</item>
+        <item name="android:statusBarColor" tools:targetApi="21">@color/desert_brown</item>
+    </style>
+</resources>

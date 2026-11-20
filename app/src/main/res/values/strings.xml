@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">الدليلة 2</string>
+    <string name="need_location_perm">يحتاج التطبيق إذن الموقع لعرض موضعك على الخريطة</string>
+    <string name="locating">جارٍ تحديد موقعك…</string>
+    <string name="map_attribution">© OpenStreetMap contributors · OpenFreeMap</string>
+    <string name="compass_description">البوصلة</string>
+    <string name="track_record">تسجيل المسار</string>
+    <string name="need_user_location">يلزم تحديد موقعك أولاً قبل الملاحة إلى نقطة</string>
+    <string name="distance_to_point">المسافة: %1$s</string>
+    <string name="mode_straight">خط مستقيم</string>
+    <string name="mode_car">سيارة</string>
+    <string name="computing_route">جارٍ البحث عن مسار عبر الطرق الحقيقية…</string>
+    <string name="recording_started">بدأ تسجيل المسار</string>
+    <string name="recording_stopped_saved">تم إيقاف التسجيل وحفظ المسار: %1$s</string>
+    <string name="recording_stopped_empty">تم إيقاف التسجيل (لم تُسجَّل نقاط)</string>
+</resources>
