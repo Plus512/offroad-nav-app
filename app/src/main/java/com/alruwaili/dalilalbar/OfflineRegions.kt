@@ -33,6 +33,12 @@ enum class OfflineRegionDef(
         /** المناطق التي تتقاطع مع مستطيل العرض الحالي للخريطة (تُستخدم عند أول تحديد موقع وعند كل توقّف تكبير/تحريك). */
         fun intersecting(visible: LatLngBounds): List<OfflineRegionDef> = entries.filter { boundsIntersect(it.bounds, visible) }
 
+        /** المنطقة/المناطق التي تقع فيها نقطة إحداثية معيّنة (تُستخدم لتحديد الدولة التي يتواجد فيها المستخدم فعلياً حالياً). */
+        fun containing(lat: Double, lon: Double): List<OfflineRegionDef> = entries.filter {
+            lat <= it.bounds.latitudeNorth && lat >= it.bounds.latitudeSouth &&
+                lon <= it.bounds.longitudeEast && lon >= it.bounds.longitudeWest
+        }
+
         private fun boundsIntersect(a: LatLngBounds, b: LatLngBounds): Boolean {
             val latOverlap = a.latitudeSouth <= b.latitudeNorth && a.latitudeNorth >= b.latitudeSouth
             val lonOverlap = a.longitudeWest <= b.longitudeEast && a.longitudeEast >= b.longitudeWest

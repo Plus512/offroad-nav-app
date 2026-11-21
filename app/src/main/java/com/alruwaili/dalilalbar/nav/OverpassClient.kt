@@ -1,6 +1,7 @@
 package com.alruwaili.dalilalbar.nav
 
 import org.json.JSONObject
+import org.maplibre.android.geometry.LatLng
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -20,7 +21,10 @@ import java.nio.charset.StandardCharsets
  */
 object OverpassClient {
     private const val ENDPOINT = "https://overpass-api.de/api/interpreter"
-    private const val TIMEOUT_MS = 25000
+    // مهلة اتصال HTTP الخاصة بنا يجب أن تكون أكبر من أعلى مهلة [timeout:N] مطلوبة من خادم Overpass
+    // نفسه في أي من الاستعلامات أدناه (٣٠ ثانية لاستعلام الممر)، وإلا قد نقطع الاتصال قبل أن يستجيب
+    // الخادم نفسه بفشل حقيقي، فنُعامل استعلاماً لا يزال يعمل كأنه خطأ اتصال.
+    private const val TIMEOUT_MS = 35000
 
     // أنواع ليست طرقاً/دروباً صالحة لسيارة: ممرات مشاة ودراجات وسلالم وممرات غير مستخدمة فعلياً، إلخ.
     private const val EXCLUDED_HIGHWAY =
@@ -39,12 +43,60 @@ object OverpassClient {
             ">;\n" +
             "out skel qt;"
 
-        val fullUrl = ENDPOINT + "?data=" + URLEncoder.encode(query, StandardCharsets.UTF_8.name())
-        val connection = URL(fullUrl).openConnection() as HttpURLConnection
+        return execute(query)
+    }
+
+    /**
+     * يجلب شبكة الطرق/الدروب الحقيقية ضمن مضلّع (poly) محدَّد بدل مربع جغرافي — يُستخدم لبناء "ممر"
+     * بحث ضيّق بمحاذاة خط السير بين نقطتين بعيدتين جداً (بدل استعلام مربع كامل غير عملي الحجم).
+     * بُنية مرشِّح poly محقَّقة من توثيق Overpass QL الرسمي: poly:"lat1 lon1 lat2 lon2 ...".
+     */
+    @Throws(OverpassException::class)
+    fun fetchRoadNetworkInPolygon(polygon: List<LatLng>): RoadNetwork {
+        val polyCoords = polygon.joinToString(" ") { "${it.latitude} ${it.longitude}" }
+        val query = "[out:json][timeout:30];\n" +
+            "(\n" +
+            "  way[\"highway\"][\"highway\"!~\"^($EXCLUDED_HIGHWAY)$\"](poly:\"$polyCoords\");\n" +
+            ");\n" +
+            "out body;\n" +
+            ">;\n" +
+            "out skel qt;"
+        return execute(query)
+    }
+
+    /** يدمج عدة شبكات طرق (من استعلامات مختلفة) في شبكة واحدة، مع إزالة تكرار العقد/الخطوط بنفس المعرّف. */
+    fun merge(networks: List<RoadNetwork>): RoadNetwork {
+        val nodes = HashMap<Long, DoubleArray>()
+        val ways = LinkedHashMap<Long, OsmWay>()
+        for (network in networks) {
+            nodes.putAll(network.nodes)
+            for (way in network.ways) ways[way.id] = way
+        }
+        return RoadNetwork(nodes, ways.values.toList())
+    }
+
+    // مطابق لسياسة استخدام Overpass API الرسمية (overpass-api.de): يجب أن يحمل كل طلب رأس
+    // User-Agent يعرّف التطبيق بوضوح، وإلا رفضت الخوادم الطلب (غالباً بخطأ HTTP 406). هذا هو
+    // السبب الحقيقي المؤكَّد (موثَّق في نقاشات مجتمع OpenStreetMap الرسمية) لظهور "HTTP 406" هنا —
+    // وليس خطأً في صياغة استعلام الممر وحده، ولهذا كان توجيه السيارة يفشل حتى للمسافات القصيرة.
+    private const val USER_AGENT = "DalilAlBar-Android/1.0 (offline navigation app; contact via GitHub Plus512)"
+
+    @Throws(OverpassException::class)
+    private fun execute(query: String): RoadNetwork {
+        val connection = URL(ENDPOINT).openConnection() as HttpURLConnection
         connection.connectTimeout = TIMEOUT_MS
         connection.readTimeout = TIMEOUT_MS
-        connection.requestMethod = "GET"
+        connection.requestMethod = "POST"
+        // توثيق Overpass API الرسمي (wiki.openstreetmap.org/wiki/Overpass_API) يوصي بإرسال
+        // الاستعلام عبر POST بترميز form، وليس عبر GET مع وضع الاستعلام كاملاً داخل رابط URL —
+        // وهذا يتجنّب أيضاً أي مشكلة محتملة في طول الرابط مع استعلامات الممر الطويلة.
+        connection.doOutput = true
+        connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+        connection.setRequestProperty("User-Agent", USER_AGENT)
         try {
+            val payload = "data=" + URLEncoder.encode(query, StandardCharsets.UTF_8.name())
+            connection.outputStream.use { it.write(payload.toByteArray(StandardCharsets.UTF_8)) }
+
             val code = connection.responseCode
             if (code != HttpURLConnection.HTTP_OK) {
                 throw OverpassException("استجابة غير متوقعة من خدمة Overpass: HTTP $code")

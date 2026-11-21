@@ -3,4 +3,13 @@
     <color name="sand_bg">#C9A66B</color>
     <color name="desert_brown">#5C3A21</color>
     <color name="white">#FFFFFF</color>
+
+    <!-- نظام الألوان الرقمي (نيون أخضر)، مطابق للمظهر المعتمد في "الدليلة بلس" (شاشة إدارة الخرائط):
+         خلفية شبه سوداء، حدود تركوازية للبطاقات، أخضر نيون للنصوص، وأخضر فاتح للعنصر النشط. -->
+    <color name="neon_bg">#0A0F0A</color>
+    <color name="neon_card_bg">#10231B</color>
+    <color name="neon_border_teal">#1FBFAE</color>
+    <color name="neon_green">#39FF6A</color>
+    <color name="neon_green_bright">#52FF7A</color>
+    <color name="neon_green_dim">#2BB84F</color>
 </resources>

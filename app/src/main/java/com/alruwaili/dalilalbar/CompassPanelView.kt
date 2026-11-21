@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.util.AttributeSet
 import android.view.View
 import kotlin.math.cos
@@ -41,10 +42,10 @@ class CompassPanelView @JvmOverloads constructor(
 
     private val needlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.argb(255, 230, 60, 40)
-        style = Paint.Style.STROKE
-        strokeWidth = 14f
-        strokeCap = Paint.Cap.ROUND
+        style = Paint.Style.FILL
     }
+
+    private val needlePath = Path()
 
     private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
@@ -79,13 +80,20 @@ class CompassPanelView @JvmOverloads constructor(
         }
         canvas.drawCircle(cx, cy, r, dialPaint)
 
-        val a = Math.toRadians(bearingDegrees.toDouble())
-        val tipX = cx + r * 0.8f * sin(a).toFloat()
-        val tipY = cy - r * 0.8f * cos(a).toFloat()
-        val tailX = cx - r * 0.3f * sin(a).toFloat()
-        val tailY = cy + r * 0.3f * cos(a).toFloat()
-        canvas.drawLine(tailX, tailY, tipX, tipY, needlePaint)
-        canvas.drawCircle(tipX, tipY, 10f, needlePaint)
+        // رأس سهم مصمَّت (مطابق تماماً لشكل سهم البوصلة العلوية CompassArrowView) بدل خط رفيع ونقطة.
+        canvas.save()
+        canvas.rotate(bearingDegrees, cx, cy)
+        val tipY = cy - r * 0.95f
+        val backY = cy + r * 0.25f
+        val halfWidth = r * 0.30f
+        needlePath.reset()
+        needlePath.moveTo(cx, tipY)
+        needlePath.lineTo(cx - halfWidth, backY)
+        needlePath.lineTo(cx, backY - r * 0.20f)
+        needlePath.lineTo(cx + halfWidth, backY)
+        needlePath.close()
+        canvas.drawPath(needlePath, needlePaint)
+        canvas.restore()
 
         canvas.drawText(bearingLabelText, cx, cy + r + 70f, labelPaint)
         canvas.drawText(distanceText, cx, cy + r + 118f, subLabelPaint)

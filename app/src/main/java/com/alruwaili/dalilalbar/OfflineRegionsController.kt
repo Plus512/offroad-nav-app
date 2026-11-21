@@ -23,7 +23,9 @@ class OfflineRegionsController(private val context: Context) {
     }
 
     interface ProgressListener {
-        fun onProgress(def: OfflineRegionDef, percent: Int)
+        /** [region] نفسه مُمرَّر هنا (وليس فقط النسبة) كي تستطيع واجهة المستخدم استدعاء pauseDownload/
+         * resumeDownload/cancelDownload عليه لاحقاً (أزرار توقف مؤقت/إلغاء/خلفية في شاشة التقدّم). */
+        fun onProgress(def: OfflineRegionDef, percent: Int, region: OfflineRegion)
         fun onComplete(def: OfflineRegionDef)
         fun onDownloadError(def: OfflineRegionDef, message: String)
     }
@@ -42,6 +44,51 @@ class OfflineRegionsController(private val context: Context) {
                 callback(emptySet())
             }
         })
+    }
+
+    /** كل المناطق المحمَّلة فعلاً حالياً، مع كائن OfflineRegion نفسه (مطلوب لحذفها). تُستخدم في شاشة الإعدادات. */
+    fun listDownloadedRegions(callback: (List<Pair<String, OfflineRegion>>) -> Unit) {
+        manager.listOfflineRegions(object : OfflineManager.ListOfflineRegionsCallback {
+            override fun onList(offlineRegions: Array<OfflineRegion>?) {
+                val pairs = (offlineRegions ?: emptyArray()).mapNotNull { region ->
+                    regionIdOf(region)?.let { id -> id to region }
+                }
+                callback(pairs)
+            }
+
+            override fun onError(error: String) {
+                callback(emptyList())
+            }
+        })
+    }
+
+    /** يحذف منطقة محمَّلة دون انترنت نهائياً (تحرير مساحة التخزين). */
+    fun deleteRegion(region: OfflineRegion, onDone: (success: Boolean) -> Unit) {
+        region.delete(object : OfflineRegion.OfflineRegionDeleteCallback {
+            override fun onDelete() {
+                onDone(true)
+            }
+
+            override fun onError(error: String) {
+                onDone(false)
+            }
+        })
+    }
+
+    /** يوقف التحميل مؤقتاً (الأمر "توقف مؤقت" في شاشة التقدّم) — يبقى ما تم تحميله، ويمكن استئنافه لاحقاً. */
+    fun pauseDownload(region: OfflineRegion) {
+        region.setDownloadState(OfflineRegion.STATE_INACTIVE)
+    }
+
+    /** يستأنف تحميلاً مُوقَفاً مؤقتاً. */
+    fun resumeDownload(region: OfflineRegion) {
+        region.setDownloadState(OfflineRegion.STATE_ACTIVE)
+    }
+
+    /** يُلغي التحميل كلياً ويحذف ما تم تنزيله منه حتى الآن (الأمر "إلغاء" في شاشة التقدّم). */
+    fun cancelDownload(region: OfflineRegion, onDone: (Boolean) -> Unit) {
+        region.setDownloadState(OfflineRegion.STATE_INACTIVE)
+        deleteRegion(region, onDone)
     }
 
     private fun regionIdOf(region: OfflineRegion): String? = try {
@@ -75,7 +122,7 @@ class OfflineRegionsController(private val context: Context) {
                                 offlineRegion.setDownloadState(OfflineRegion.STATE_INACTIVE)
                                 listener.onComplete(def)
                             } else {
-                                listener.onProgress(def, percent)
+                                listener.onProgress(def, percent, offlineRegion)
                             }
                         }
 

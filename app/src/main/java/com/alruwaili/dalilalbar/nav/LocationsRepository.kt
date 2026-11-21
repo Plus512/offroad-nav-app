@@ -69,4 +69,34 @@ class LocationsRepository(private val context: Context) {
         }
         return result
     }
+
+    /**
+     * بحث عن مواقع بالاسم عبر كامل قاعدة البيانات (وليس فقط المنطقة المرئية)، مطابقة جزئية (LIKE)
+     * تدعم البحث العربي مباشرة لأن العناوين كلها عربية فعلياً في الملف الحقيقي. يُستدعى من خيط خلفية
+     * (يفتح/يستعلم SQLite وقد يستغرق وقتاً على جهاز ضعيف مع ٣١٤ ألف صف، فلا يُستدعى من الخيط الرئيسي).
+     */
+    fun searchByName(query: String, limit: Int = 30): List<LocationRow> {
+        val database = ensureOpen() ?: return emptyList()
+        val result = ArrayList<LocationRow>()
+        val likePattern = "%" + query.trim() + "%"
+        val cursor = database.rawQuery(
+            "SELECT _id, title, latitude, longitude FROM locations " +
+                "WHERE title LIKE ? AND title IS NOT NULL AND trim(title) != '' " +
+                "ORDER BY length(title) ASC LIMIT ?",
+            arrayOf(likePattern, limit.toString())
+        )
+        cursor.use {
+            while (it.moveToNext()) {
+                result.add(
+                    LocationRow(
+                        id = it.getLong(0),
+                        title = it.getString(1),
+                        latitude = it.getDouble(2),
+                        longitude = it.getDouble(3)
+                    )
+                )
+            }
+        }
+        return result
+    }
 }

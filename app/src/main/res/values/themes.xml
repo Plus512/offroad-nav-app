@@ -7,4 +7,39 @@
         <item name="colorSecondary">@color/sand_bg</item>
         <item name="android:statusBarColor" tools:targetApi="21">@color/desert_brown</item>
     </style>
+
+    <!-- مظهر "رقمي" (أقرب تقريب ممكن بدون تضمين خط LCD فعلي غير متوفر لدينا للتحقق منه): أسود تقريباً
+         + حدود/نص أخضر نيون بخط عريض عريض التباعد، تُستخدم في كل النوافذ المنبثقة (AlertDialog) وشاشة
+         الإعدادات. ملاحظة أمانة: هذا تقريب بخط monospace عريض وتباعد حروف، وليس خط LCD رقمي حقيقي —
+         لم نضمّن ملف خط لأنه يتطلب تحميل أصل خط فعلي لم يُتحقَّق منه بعد. -->
+    <style name="Theme.DalilAlBar.NeonDialog" parent="Theme.MaterialComponents.DayNight.Dialog.Alert">
+        <item name="colorPrimary">@color/neon_green</item>
+        <item name="colorOnPrimary">@color/neon_bg</item>
+        <item name="colorSurface">@color/neon_card_bg</item>
+        <item name="colorOnSurface">@color/neon_green</item>
+        <item name="android:textColorPrimary">@color/neon_green</item>
+        <item name="android:textColorSecondary">@color/neon_green_dim</item>
+        <item name="android:background">@color/neon_card_bg</item>
+        <item name="buttonBarPositiveButtonStyle">@style/Widget.DalilAlBar.NeonDialogButton</item>
+        <item name="buttonBarNegativeButtonStyle">@style/Widget.DalilAlBar.NeonDialogButton</item>
+        <item name="buttonBarNeutralButtonStyle">@style/Widget.DalilAlBar.NeonDialogButton</item>
+    </style>
+
+    <style name="Widget.DalilAlBar.NeonDialogButton" parent="Widget.MaterialComponents.Button.TextButton">
+        <item name="android:textColor">@color/neon_green_bright</item>
+        <item name="fontFamily">monospace</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <!-- نص "رقمي" عام (عناوين/أجسام نصوص شاشة الإعدادات) -->
+    <style name="TextAppearance.DalilAlBar.NeonDigital">
+        <item name="android:fontFamily">monospace</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">@color/neon_green</item>
+        <item name="android:letterSpacing">0.03</item>
+        <item name="android:shadowColor">#8039FF6A</item>
+        <item name="android:shadowRadius">6</item>
+        <item name="android:shadowDx">0</item>
+        <item name="android:shadowDy">0</item>
+    </style>
 </resources>

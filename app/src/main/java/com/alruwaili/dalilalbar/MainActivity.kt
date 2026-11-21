@@ -2,7 +2,13 @@ package com.alruwaili.dalilalbar
 
 import android.Manifest
 import android.app.AlertDialog
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.RectF
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -95,12 +101,48 @@ class MainActivity : AppCompatActivity() {
     private var lastOfflinePromptKey: String? = null
 
     private lateinit var trackRecorder: TrackRecorder
+    private var recordingBlinkAnimator: android.animation.ObjectAnimator? = null
+    private lateinit var savedPlacesStore: com.alruwaili.dalilalbar.nav.SavedPlacesStore
+    private lateinit var savedTracksStore: com.alruwaili.dalilalbar.nav.SavedTracksStore
+    private var measuring = false
+    private var measureStart: LatLng? = null
     private var activeDestination: LatLng? = null
     private var splitViewVisible = false
 
     private lateinit var locationsRepository: LocationsRepository
     private var lastLocationsQueryKey: String? = null
     private var locationsQueryInFlight = false
+
+    // ===== اتجاه الجهاز الحقيقي (بوصلة فعلية تدور مع دوران الهاتف، وليست رقماً ثابتاً) =====
+    private lateinit var sensorManager: SensorManager
+    private var rotationSensor: Sensor? = null
+    /** زاوية الشمال المغناطيسي/الحقيقي الحالية بالنسبة لاتجاه الهاتف، محدَّثة من حسّاس الجهاز فعلياً. */
+    private var deviceAzimuthDegrees: Float = 0f
+    private val rotationRaw = FloatArray(9)
+    private val rotationRemapped = FloatArray(9)
+    private val orientationRaw = FloatArray(3)
+
+    private val orientationListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            SensorManager.getRotationMatrixFromVector(rotationRaw, event.values)
+            // SensorManager.getOrientation() على مصفوفة الدوران الخام يُعطي اتجاهاً صحيحاً فقط عندما
+            // يكون الجهاز مستلقياً أفقياً (الشاشة للأعلى) — وهو سلوك موثَّق في Android API نفسه، وليس
+            // تخميناً. عند حمل الهاتف عمودياً (الوضع الطبيعي لاستخدام البوصلة)، يجب أولاً إعادة تخطيط
+            // محاور مصفوفة الدوران (remapCoordinateSystem) من إطار الجهاز الافتراضي إلى الإطار الذي
+            // يلائم حمله عمودياً (الشاشة تجاه المستخدم، الحافة العلوية للأعلى): AXIS_X يبقى كما هو،
+            // و AXIS_Z يُستبدل بـ AXIS_Y — أي remapCoordinateSystem(rotationRaw, AXIS_X, AXIS_Z, ...)
+            // كما في توثيق Android الرسمي لحالة "القراءة عندما يُحمل الجهاز كبوصلة عمودية".
+            SensorManager.remapCoordinateSystem(
+                rotationRaw, SensorManager.AXIS_X, SensorManager.AXIS_Z, rotationRemapped
+            )
+            SensorManager.getOrientation(rotationRemapped, orientationRaw)
+            val azimuthDeg = Math.toDegrees(orientationRaw[0].toDouble())
+            deviceAzimuthDegrees = (((azimuthDeg + 360.0) % 360.0)).toFloat()
+            refreshCompassAndPanel()
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
 
     private val requestLocationPermission =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
@@ -124,6 +166,11 @@ class MainActivity : AppCompatActivity() {
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
         trackRecorder = TrackRecorder(applicationContext)
         locationsRepository = LocationsRepository(applicationContext)
+        savedPlacesStore = com.alruwaili.dalilalbar.nav.SavedPlacesStore(applicationContext)
+        savedTracksStore = com.alruwaili.dalilalbar.nav.SavedTracksStore(applicationContext)
+
+        sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
+        rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
 
         offlineController = OfflineRegionsController(applicationContext)
         offlineController.listDownloadedIds { ids -> downloadedRegionIds.addAll(ids) }
@@ -139,6 +186,10 @@ class MainActivity : AppCompatActivity() {
                 tryActivateLocationComponent()
                 setupNavigationLayers(style)
                 setupLocationsLabelsLayer(style)
+                setupSavedItemsLayers(style)
+                setupMeasureLayer(style)
+                refreshSavedPlacesLayer()
+                refreshSavedTracksLayer()
             }
 
             // نُعطّل بوصلة المكتبة الجاهزة لأننا نستخدم بوصلتنا المخصّصة (compassArrow) التي نتحكم
@@ -158,11 +209,24 @@ class MainActivity : AppCompatActivity() {
                 checkOfflineRegionsForVisibleArea(map)
                 updateLocationLabels(map)
             }
+            // تحديث حيّ لأداة قياس المسافة أثناء تحريك الخريطة (وليس فقط عند التوقف) — لتمتد الخريطة
+            // بالشريط كما طُلب تحديداً: "كل ما حرّك المستخدم الخريطة يمتد معه شريط يحسب المسافة".
+            map.addOnCameraMoveListener {
+                if (measuring && measureStart != null) updateMeasureLine(map)
+            }
         }
 
         binding.fabLocate.setOnClickListener { centerOnMyLocation() }
         binding.fabTrackRecord.setOnClickListener { toggleTrackRecording() }
+        binding.fabMenu.setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
+        binding.fabSearch.setOnClickListener { showSearchDialog() }
+        binding.fabSavedItems.setOnClickListener { showSavedItemsDialog() }
+        binding.fabMeasure.setOnClickListener { toggleMeasureTool() }
         binding.compassArrow.setOnClickListener { toggleSplitView() }
+        binding.fabCloseCompassPanel.setOnClickListener { toggleSplitView() }
+        binding.fabEndTrip.setOnClickListener { endTrip() }
 
         if (hasLocationPermission()) {
             startLocating()
@@ -239,6 +303,15 @@ class MainActivity : AppCompatActivity() {
     // ===================== الملاحة: اللمس على الخريطة + المسار + البوصلة =====================
 
     private fun onMapTapped(point: LatLng) {
+        if (measuring) {
+            if (measureStart == null) {
+                measureStart = point
+                binding.tvMeasureDistance.visibility = View.VISIBLE
+                mapLibreMapOrNull?.let { updateMeasureLine(it) }
+                Toast.makeText(this, R.string.measure_distance, Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
         val loc = lastLocation
         if (!locationComponentActive || loc == null) {
             Toast.makeText(this, R.string.need_user_location, Toast.LENGTH_SHORT).show()
@@ -246,15 +319,337 @@ class MainActivity : AppCompatActivity() {
         }
         val userLatLng = LatLng(loc.latitude, loc.longitude)
         val distance = GeoMath.distanceMeters(userLatLng, point)
-        showNavigationChoiceDialog(userLatLng, point, distance)
+        val placeName = findPlaceNameAt(point)
+        showNavigationChoiceDialog(userLatLng, point, distance, placeName)
     }
 
-    private fun showNavigationChoiceDialog(user: LatLng, destination: LatLng, distance: Double) {
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.distance_to_point, GeoMath.formatDistance(distance)))
-            .setItems(arrayOf(getString(R.string.mode_straight), getString(R.string.mode_car))) { _, which ->
-                val mode = if (which == 0) NavMode.STRAIGHT else NavMode.CAR
-                startRouting(user, destination, mode)
+    // ===================== أداة قياس المسافة (زر يمين الشاشة) =====================
+
+    private fun toggleMeasureTool() {
+        measuring = !measuring
+        if (!measuring) {
+            measureStart = null
+            binding.tvMeasureDistance.visibility = View.GONE
+            loadedStyle?.getSourceAs<GeoJsonSource>("measure-line-source")
+                ?.setGeoJson(FeatureCollection.fromFeatures(emptyArray()))
+        } else {
+            Toast.makeText(this, R.string.measure_distance, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun updateMeasureLine(map: MapLibreMap) {
+        val start = measureStart ?: return
+        val center = map.cameraPosition.target ?: return
+        val distance = GeoMath.distanceMeters(start, center)
+        binding.tvMeasureDistance.text = getString(R.string.measure_distance_label, GeoMath.formatDistance(distance))
+        val line = LineString.fromLngLats(listOf(Point.fromLngLat(start.longitude, start.latitude), Point.fromLngLat(center.longitude, center.latitude)))
+        loadedStyle?.getSourceAs<GeoJsonSource>("measure-line-source")
+            ?.setGeoJson(FeatureCollection.fromFeatures(arrayOf(Feature.fromGeometry(line))))
+    }
+
+    private fun setupMeasureLayer(style: Style) {
+        val source = GeoJsonSource("measure-line-source", FeatureCollection.fromFeatures(emptyArray()))
+        style.addSource(source)
+        style.addLayer(
+            LineLayer("measure-line-layer", "measure-line-source").withProperties(
+                PropertyFactory.lineWidth(4f),
+                PropertyFactory.lineColor("#39FF6A"),
+                PropertyFactory.lineDasharray(arrayOf(1f, 1.5f))
+            )
+        )
+    }
+
+    // ===================== البحث عن موقع بالاسم =====================
+
+    private fun showSearchDialog() {
+        val input = android.widget.EditText(this).apply { hint = getString(R.string.search_hint) }
+        val dialog = AlertDialog.Builder(this, R.style.Theme_DalilAlBar_NeonDialog)
+            .setTitle(R.string.search_title)
+            .setView(input)
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+        input.setOnEditorActionListener { _, _, _ ->
+            runSearch(input.text?.toString().orEmpty(), dialog)
+            true
+        }
+        dialog.show()
+    }
+
+    private fun runSearch(query: String, parentDialog: AlertDialog) {
+        if (query.isBlank()) return
+        Thread {
+            val results = locationsRepository.searchByName(query, 30)
+            runOnUiThread {
+                if (results.isEmpty()) {
+                    Toast.makeText(this, R.string.search_no_results, Toast.LENGTH_SHORT).show()
+                } else {
+                    parentDialog.dismiss()
+                    AlertDialog.Builder(this, R.style.Theme_DalilAlBar_NeonDialog)
+                        .setTitle(R.string.search_title)
+                        .setItems(results.map { it.title }.toTypedArray()) { _, which ->
+                            val r = results[which]
+                            val target = LatLng(r.latitude, r.longitude)
+                            mapLibreMapOrNull?.animateCamera(CameraUpdateFactory.newLatLngZoom(target, 14.0))
+                        }
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .show()
+                }
+            }
+        }.start()
+    }
+
+    // ===================== المحفوظات (مواقع محفوظة + مسارات مسجَّلة) =====================
+
+    private fun setupSavedItemsLayers(style: Style) {
+        val placesSource = GeoJsonSource("saved-places-source", FeatureCollection.fromFeatures(emptyArray()))
+        style.addSource(placesSource)
+        style.addLayer(
+            SymbolLayer("saved-places-layer", "saved-places-source").withProperties(
+                PropertyFactory.textField(Expression.get("name")),
+                PropertyFactory.textFont(arrayOf("Noto Sans Bold")),
+                PropertyFactory.textSize(13f),
+                PropertyFactory.textColor("#39FF6A"),
+                PropertyFactory.textHaloColor("#000000"),
+                PropertyFactory.textHaloWidth(1.2f),
+                PropertyFactory.textOffset(arrayOf(0f, 1.2f))
+            )
+        )
+        style.addLayer(
+            CircleLayer("saved-places-point-layer", "saved-places-source").withProperties(
+                PropertyFactory.circleRadius(6f),
+                PropertyFactory.circleColor("#39FF6A"),
+                PropertyFactory.circleStrokeColor("#000000"),
+                PropertyFactory.circleStrokeWidth(1.5f)
+            )
+        )
+
+        val tracksSource = GeoJsonSource("saved-tracks-source", FeatureCollection.fromFeatures(emptyArray()))
+        style.addSource(tracksSource)
+        style.addLayer(
+            LineLayer("saved-tracks-layer", "saved-tracks-source").withProperties(
+                PropertyFactory.lineWidth(4f),
+                PropertyFactory.lineColor("#FFA500")
+            )
+        )
+    }
+
+    private fun refreshSavedPlacesLayer() {
+        val style = loadedStyle ?: return
+        val features = savedPlacesStore.list().filter { it.visible }.map {
+            Feature.fromGeometry(Point.fromLngLat(it.latLng.longitude, it.latLng.latitude)).apply {
+                addStringProperty("name", it.name)
+            }
+        }
+        style.getSourceAs<GeoJsonSource>("saved-places-source")?.setGeoJson(FeatureCollection.fromFeatures(features))
+    }
+
+    private fun refreshSavedTracksLayer() {
+        val style = loadedStyle ?: return
+        val features = savedTracksStore.list().filter { it.visible }.mapNotNull { t ->
+            val points = savedTracksStore.readPoints(t.file)
+            if (points.size < 2) return@mapNotNull null
+            Feature.fromGeometry(LineString.fromLngLats(points.map { Point.fromLngLat(it.longitude, it.latitude) }))
+        }
+        style.getSourceAs<GeoJsonSource>("saved-tracks-source")?.setGeoJson(FeatureCollection.fromFeatures(features))
+    }
+
+    private fun showSaveLocationDialog(point: LatLng) {
+        val input = android.widget.EditText(this).apply {
+            hint = getString(R.string.save_location_name_hint)
+            setText(findPlaceNameAt(point) ?: "")
+        }
+        AlertDialog.Builder(this, R.style.Theme_DalilAlBar_NeonDialog)
+            .setTitle(R.string.save_location)
+            .setView(input)
+            .setPositiveButton(R.string.save) { _, _ ->
+                val name = input.text?.toString()?.trim().orEmpty()
+                val saved = savedPlacesStore.add(name, point)
+                refreshSavedPlacesLayer()
+                Toast.makeText(this, getString(R.string.location_saved, saved.name), Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun showSavedItemsDialog() {
+        val places = savedPlacesStore.list()
+        val tracks = savedTracksStore.list()
+        val view = android.widget.ScrollView(this)
+        val container = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+        }
+        view.addView(container)
+
+        fun sectionHeader(text: String) {
+            container.addView(android.widget.TextView(this).apply {
+                this.text = text
+                setTextColor(resources.getColor(R.color.neon_green, theme))
+                typeface = android.graphics.Typeface.create(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
+                textSize = 14f
+                setPadding(0, dp(12), 0, dp(4))
+            })
+        }
+
+        val dialogRef = arrayOfNulls<AlertDialog>(1)
+
+        sectionHeader(getString(R.string.saved_places_section))
+        if (places.isEmpty()) {
+            container.addView(android.widget.TextView(this).apply {
+                text = getString(R.string.saved_items_empty)
+                setTextColor(resources.getColor(R.color.neon_green_dim, theme))
+            })
+        }
+        places.forEach { place ->
+            val row = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+            }
+            val label = android.widget.TextView(this).apply {
+                text = place.name
+                setTextColor(resources.getColor(R.color.neon_green, theme))
+                layoutParams = android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val toggle = android.widget.Switch(this).apply {
+                isChecked = place.visible
+                setOnCheckedChangeListener { _, checked ->
+                    savedPlacesStore.setVisible(place.id, checked)
+                    refreshSavedPlacesLayer()
+                }
+            }
+            val goBtn = android.widget.Button(this, null, 0, R.style.Widget_DalilAlBar_NeonDialogButton).apply {
+                text = getString(R.string.go_to)
+                setBackgroundResource(R.drawable.bg_neon_tab_active)
+                setOnClickListener {
+                    mapLibreMapOrNull?.animateCamera(CameraUpdateFactory.newLatLngZoom(place.latLng, 14.0))
+                    dialogRef[0]?.dismiss()
+                }
+            }
+            val delBtn = android.widget.Button(this, null, 0, R.style.Widget_DalilAlBar_NeonDialogButton).apply {
+                text = getString(R.string.delete)
+                setBackgroundResource(R.drawable.bg_neon_tab_active)
+                setOnClickListener {
+                    savedPlacesStore.delete(place.id)
+                    refreshSavedPlacesLayer()
+                    Toast.makeText(this@MainActivity, R.string.saved_place_deleted, Toast.LENGTH_SHORT).show()
+                    dialogRef[0]?.dismiss()
+                    showSavedItemsDialog()
+                }
+            }
+            row.addView(label); row.addView(toggle); row.addView(goBtn); row.addView(delBtn)
+            container.addView(row)
+        }
+
+        sectionHeader(getString(R.string.saved_tracks_section))
+        if (tracks.isEmpty()) {
+            container.addView(android.widget.TextView(this).apply {
+                text = getString(R.string.saved_items_empty)
+                setTextColor(resources.getColor(R.color.neon_green_dim, theme))
+            })
+        }
+        tracks.forEach { track ->
+            val row = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+            }
+            val label = android.widget.TextView(this).apply {
+                text = track.name
+                setTextColor(resources.getColor(R.color.neon_green, theme))
+                layoutParams = android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val toggle = android.widget.Switch(this).apply {
+                isChecked = track.visible
+                setOnCheckedChangeListener { _, checked ->
+                    savedTracksStore.setVisible(track.file.name, checked)
+                    refreshSavedTracksLayer()
+                }
+            }
+            val goBtn = android.widget.Button(this, null, 0, R.style.Widget_DalilAlBar_NeonDialogButton).apply {
+                text = getString(R.string.go_to)
+                setBackgroundResource(R.drawable.bg_neon_tab_active)
+                setOnClickListener {
+                    val points = savedTracksStore.readPoints(track.file)
+                    if (points.isNotEmpty()) {
+                        mapLibreMapOrNull?.animateCamera(CameraUpdateFactory.newLatLngZoom(points.first(), 13.0))
+                    }
+                    dialogRef[0]?.dismiss()
+                }
+            }
+            val delBtn = android.widget.Button(this, null, 0, R.style.Widget_DalilAlBar_NeonDialogButton).apply {
+                text = getString(R.string.delete)
+                setBackgroundResource(R.drawable.bg_neon_tab_active)
+                setOnClickListener {
+                    savedTracksStore.delete(track.file)
+                    refreshSavedTracksLayer()
+                    Toast.makeText(this@MainActivity, R.string.saved_track_deleted, Toast.LENGTH_SHORT).show()
+                    dialogRef[0]?.dismiss()
+                    showSavedItemsDialog()
+                }
+            }
+            row.addView(label); row.addView(toggle); row.addView(goBtn); row.addView(delBtn)
+            container.addView(row)
+        }
+
+        val dialog = AlertDialog.Builder(this, R.style.Theme_DalilAlBar_NeonDialog)
+            .setTitle(R.string.saved_items_title)
+            .setView(view)
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+        dialogRef[0] = dialog
+        dialog.show()
+    }
+
+    /**
+     * يبحث عن اسم موقع عند نقطة اللمس، إن وُجد: أولاً من طبقة مواقع المستخدم الخاصة (locations.db)،
+     * ثم من طبقات الأماكن/المعالم في الخريطة الأساسية نفسها (poi/place من style_dalil.json، بنفس
+     * ترتيب أولوية الاسم المستخدَم في تلك الطبقات: name:ar ثم name:nonlatin ثم name_en ثم name).
+     * يُعيد null إن لم يُلمَس أي عنصر مسمّى فعلياً (لا تخمين لاسم غير موجود).
+     */
+    private fun findPlaceNameAt(point: LatLng): String? {
+        val map = mapLibreMapOrNull ?: return null
+        val screenPoint = map.projection.toScreenLocation(point)
+        val tolerance = dp(24).toFloat()
+        val rect = RectF(
+            screenPoint.x - tolerance, screenPoint.y - tolerance,
+            screenPoint.x + tolerance, screenPoint.y + tolerance
+        )
+
+        map.queryRenderedFeatures(rect, "locations-labels-layer").firstOrNull()?.let { feature ->
+            val title = feature.getStringProperty("title")
+            if (!title.isNullOrBlank()) return title
+        }
+
+        val styleLabelLayers = arrayOf(
+            "poi_r20", "poi_r7", "poi_r1", "poi_transit",
+            "label_other", "label_village", "label_town", "label_city"
+        )
+        val features = map.queryRenderedFeatures(rect, *styleLabelLayers)
+        for (feature in features) {
+            val name = feature.getStringProperty("name:ar")
+                ?: feature.getStringProperty("name:nonlatin")
+                ?: feature.getStringProperty("name_en")
+                ?: feature.getStringProperty("name")
+            if (!name.isNullOrBlank()) return name
+        }
+        return null
+    }
+
+    private fun showNavigationChoiceDialog(user: LatLng, destination: LatLng, distance: Double, placeName: String?) {
+        val title = if (placeName != null) {
+            getString(R.string.distance_to_named_point, placeName, GeoMath.formatDistance(distance))
+        } else {
+            getString(R.string.distance_to_point, GeoMath.formatDistance(distance))
+        }
+        AlertDialog.Builder(this, R.style.Theme_DalilAlBar_NeonDialog)
+            .setTitle(title)
+            .setItems(
+                arrayOf(getString(R.string.mode_straight), getString(R.string.mode_car), getString(R.string.save_location))
+            ) { _, which ->
+                when (which) {
+                    0 -> startRouting(user, destination, NavMode.STRAIGHT)
+                    1 -> startRouting(user, destination, NavMode.CAR)
+                    else -> showSaveLocationDialog(destination)
+                }
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
@@ -262,6 +657,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun startRouting(user: LatLng, destination: LatLng, mode: NavMode) {
         activeDestination = destination
+        binding.fabEndTrip.visibility = View.VISIBLE
         binding.status.visibility = View.VISIBLE
         binding.status.text = getString(R.string.computing_route)
         RoutingEngine.computeRoute(user, destination, mode) { outcome ->
@@ -271,6 +667,21 @@ class MainActivity : AppCompatActivity() {
             refreshCompassAndPanel()
             outcome.fallbackReason?.let { reason -> Toast.makeText(this, reason, Toast.LENGTH_LONG).show() }
         }
+    }
+
+    /** ينهي الرحلة النشطة: يمسح المسار المرسوم وعلامة الوجهة، ويعيد البوصلة واللوحة لوضعهما الافتراضي. */
+    private fun endTrip() {
+        activeDestination = null
+        splitViewVisible = false
+        binding.compassPanel.visibility = View.GONE
+        binding.fabCloseCompassPanel.visibility = View.GONE
+        binding.fabEndTrip.visibility = View.GONE
+        val style = loadedStyle
+        style?.getSourceAs<GeoJsonSource>("route-solid-source")?.setGeoJson(FeatureCollection.fromFeatures(emptyArray()))
+        style?.getSourceAs<GeoJsonSource>("route-straight-source")?.setGeoJson(FeatureCollection.fromFeatures(emptyArray()))
+        style?.getSourceAs<GeoJsonSource>("dest-marker-source")?.setGeoJson(FeatureCollection.fromFeatures(emptyArray()))
+        refreshCompassAndPanel()
+        Toast.makeText(this, R.string.trip_ended, Toast.LENGTH_SHORT).show()
     }
 
     /** يضيف طبقتي خط المسار (حلّة واحدة ملوّنة حسب معبّد/درب) وخط الاتصال المستقيم (منقّط)، وطبقة علامة الوجهة. */
@@ -297,7 +708,9 @@ class MainActivity : AppCompatActivity() {
             LineLayer("route-straight-layer", "route-straight-source").withProperties(
                 PropertyFactory.lineWidth(5f),
                 PropertyFactory.lineColor("#202020"),
-                PropertyFactory.lineDasharray(arrayOf(0f, 2f))
+                // كان هذا النمط مكتوباً خطأً [0, 2] سابقاً (أي خط بطول صفر) فكان الخط غير مرئي تماماً
+                // رغم رسمه فعلياً في الخلفية — هذا هو السبب الحقيقي وراء "الخط المستقيم لا يظهر".
+                PropertyFactory.lineDasharray(arrayOf(2f, 2f))
             )
         )
 
@@ -417,25 +830,34 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    /** يحدّث اتجاه السهم (شمال افتراضياً، أو نحو الوجهة بعد اختيارها) ونص لوحة البوصلة إن كانت ظاهرة. */
+    /**
+     * يحدّث اتجاه السهم ونص لوحة البوصلة. الاتجاه الجغرافي الفعلي (نحو الشمال افتراضياً، أو نحو
+     * الوجهة بعد اختيارها) يُحسب من الإحداثيات كما كان، لكن زاوية رسم السهم على الشاشة الآن تُطرح
+     * منها زاوية اتجاه الجهاز الحقيقية (deviceAzimuthDegrees، من حسّاس دوران الجهاز الفعلي) — فيصبح
+     * السهم بوصلة فعلية تدور مع دوران الهاتف (يشير دائماً إلى الاتجاه الحقيقي بصرف النظر عن وضعية
+     * إمساكك للجهاز)، لا رقماً ثابتاً كما كان سابقاً. النص (الدرجة ونص الجهة) يبقى الاتجاه الجغرافي
+     * الموضوعي نفسه (غير متأثر بدوران الجهاز)، لأنه قراءة معلوماتية لا إبرة بصرية.
+     */
     private fun refreshCompassAndPanel() {
         val destination = activeDestination
         val loc = lastLocation
-        if (destination == null || loc == null) {
-            binding.compassArrow.pointsToDestination = false
-            binding.compassArrow.headingDegrees = 0f
-            return
+        val hasTarget = destination != null && loc != null
+        val targetBearing = if (hasTarget) {
+            GeoMath.bearingDegrees(LatLng(loc!!.latitude, loc.longitude), destination!!)
+        } else {
+            0.0 // لا وجهة مختارة: تعمل كبوصلة عادية تشير إلى الشمال الحقيقي
         }
-        val userLatLng = LatLng(loc.latitude, loc.longitude)
-        val bearing = GeoMath.bearingDegrees(userLatLng, destination)
-        binding.compassArrow.headingDegrees = bearing.toFloat()
-        binding.compassArrow.pointsToDestination = true
+        val displayHeading = (((targetBearing - deviceAzimuthDegrees) % 360.0) + 360.0) % 360.0
 
-        if (splitViewVisible) {
-            val distance = GeoMath.distanceMeters(userLatLng, destination)
-            binding.compassPanel.bearingDegrees = bearing.toFloat()
+        binding.compassArrow.headingDegrees = displayHeading.toFloat()
+        binding.compassArrow.pointsToDestination = hasTarget
+
+        if (splitViewVisible && hasTarget) {
+            val userLatLng = LatLng(loc!!.latitude, loc.longitude)
+            val distance = GeoMath.distanceMeters(userLatLng, destination!!)
+            binding.compassPanel.bearingDegrees = displayHeading.toFloat()
             binding.compassPanel.bearingLabelText =
-                "الاتجاه: ${Math.round(bearing)} درجة ${GeoMath.compassLabelArabic(bearing)}"
+                "الاتجاه: ${Math.round(targetBearing)} درجة ${GeoMath.compassLabelArabic(targetBearing)}"
             binding.compassPanel.distanceText = "المسافة المتبقية: ${GeoMath.formatDistance(distance)}"
             binding.compassPanel.elevationText = if (loc.hasAltitude()) {
                 "الارتفاع: ${Math.round(loc.altitude)} م"
@@ -449,36 +871,101 @@ class MainActivity : AppCompatActivity() {
         if (activeDestination == null) return
         splitViewVisible = !splitViewVisible
         binding.compassPanel.visibility = if (splitViewVisible) View.VISIBLE else View.GONE
+        binding.fabCloseCompassPanel.visibility = if (splitViewVisible) View.VISIBLE else View.GONE
         if (splitViewVisible) refreshCompassAndPanel()
     }
 
     private fun toggleTrackRecording() {
         if (trackRecorder.isRecording) {
-            val file = trackRecorder.stopAndSave()
-            binding.fabTrackRecord.setImageResource(android.R.drawable.ic_menu_edit)
-            if (file != null) {
-                Toast.makeText(this, getString(R.string.recording_stopped_saved, file.name), Toast.LENGTH_LONG).show()
-            } else {
+            val pending = trackRecorder.stop()
+            binding.fabTrackRecord.setImageResource(R.drawable.ic_track_start)
+            recordingBlinkAnimator?.cancel()
+            recordingBlinkAnimator = null
+            binding.tvRecordingIndicator.alpha = 1f
+            binding.tvRecordingIndicator.visibility = View.GONE
+            if (pending == null || pending.pointCount < 2) {
                 Toast.makeText(this, R.string.recording_stopped_empty, Toast.LENGTH_SHORT).show()
+                return
             }
+            showTrackInfoDialog(pending)
         } else {
             trackRecorder.start()
-            binding.fabTrackRecord.setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+            binding.fabTrackRecord.setImageResource(R.drawable.ic_track_stop)
+            binding.tvRecordingIndicator.visibility = View.VISIBLE
+            recordingBlinkAnimator?.cancel()
+            recordingBlinkAnimator = android.animation.ObjectAnimator.ofFloat(binding.tvRecordingIndicator, View.ALPHA, 1f, 0.2f).apply {
+                duration = 650
+                repeatMode = android.animation.ValueAnimator.REVERSE
+                repeatCount = android.animation.ValueAnimator.INFINITE
+                start()
+            }
             Toast.makeText(this, R.string.recording_started, Toast.LENGTH_SHORT).show()
         }
+    }
+
+    /** بعد إيقاف التسجيل: يعرض معلومات المسار (المسافة/المدة/عدد النقاط) مع خيار حفظ باسم أو حذف،
+     * كما طُلب صراحة — لا يُكتب أي ملف قبل أن يختار المستخدم "حفظ". */
+    private fun showTrackInfoDialog(pending: com.alruwaili.dalilalbar.nav.TrackRecorder.PendingTrack) {
+        val totalSeconds = pending.durationMs / 1000
+        val durationText = String.format(
+            java.util.Locale.US, "%02d:%02d:%02d",
+            totalSeconds / 3600, (totalSeconds % 3600) / 60, totalSeconds % 60
+        )
+        val info = getString(
+            R.string.track_info_message,
+            GeoMath.formatDistance(pending.distanceMeters),
+            durationText,
+            pending.pointCount
+        )
+        AlertDialog.Builder(this, R.style.Theme_DalilAlBar_NeonDialog)
+            .setTitle(R.string.track_info_title)
+            .setMessage(info)
+            .setPositiveButton(R.string.save_as_name) { _, _ -> promptSaveTrackName(pending) }
+            .setNegativeButton(R.string.delete) { _, _ ->
+                Toast.makeText(this, R.string.track_discarded, Toast.LENGTH_SHORT).show()
+            }
+            .show()
+    }
+
+    private fun promptSaveTrackName(pending: com.alruwaili.dalilalbar.nav.TrackRecorder.PendingTrack) {
+        val input = android.widget.EditText(this).apply {
+            hint = getString(R.string.track_name_hint)
+            setText(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US).format(java.util.Date()))
+        }
+        AlertDialog.Builder(this, R.style.Theme_DalilAlBar_NeonDialog)
+            .setTitle(R.string.save_as_name)
+            .setView(input)
+            .setPositiveButton(R.string.save) { _, _ ->
+                val name = input.text?.toString()?.trim().orEmpty()
+                val file = trackRecorder.saveAs(pending, name)
+                Toast.makeText(this, getString(R.string.recording_stopped_saved, file.name), Toast.LENGTH_LONG).show()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     // ===================== تحميل الخريطة دون انترنت (من دفعة سابقة، دون تعديل) =====================
 
     /**
-     * يفحص المنطقة المرئية حالياً على الخريطة: إن كانت تتقاطع مع منطقة (دولة/جزء من السعودية) لم
-     * تُحمَّل دون انترنت ولا يجري تحميلها الآن، يعرض سؤال التحميل. يتكرر هذا الفحص تلقائياً مع كل
-     * توقّف للكاميرا (بعد أول تحديد لموقع المستخدم عند فتح التطبيق، وبعد كل عملية تكبير/تصغير أو
-     * تحريك) — فإذا رفض المستخدم التحميل، سيُسأل مرة أخرى عند تكبير/تحريك يغيّر المنطقة المعروضة.
+     * أول مرة فقط في عمر التطبيق: تُعرض قائمة بكل الدول/المناطق المتاحة للتحميل دفعة واحدة (بصرف
+     * النظر عن منطقة العرض الحالية)، ولا تُعرض هذه القائمة الكاملة مرة أخرى أبداً بعد ذلك (محفوظة
+     * في SharedPreferences، بصرف النظر عن اختيار المستخدم). في كل مرة لاحقة: يُفحص فقط موقع المستخدم
+     * الفعلي الحالي (lastLocation)، وإن كانت الدولة التي يتواجد فيها غير محمَّلة دون انترنت ولا يجري
+     * تحميلها الآن، يُعرض سؤال تحميل تلك الدولة وحدها (لا قائمة الدول الأخرى). يتكرر هذا الفحص تلقائياً
+     * مع كل توقّف للكاميرا.
+     */
+    /**
+     * طُلب صراحة (٢١ نوفمبر) ألا تُعرض قائمة كل الدول إطلاقاً — فقط دولة المستخدم الفعلية بحسب
+     * موقعه (GPS) الآن، عند أول فتح وعند كل توقّف تكبير/تحريك لاحق أيضاً. لا فرق بين "أول مرة" وما
+     * بعدها بعد الآن: نفس منطق containing() يُطبَّق دائماً.
+     * ملاحظة أمانة: "أي دولة في العالم" يتطلّب حدود كل دولة حقيقية، وهذا غير متوفر لدينا — المناطق
+     * المعرَّفة فعلياً هنا تبقى محصورة بالأردن/السعودية (٣ مناطق)/الإمارات/الكويت/قطر/البحرين/عُمان؛
+     * لمستخدم خارج هذه الدول لا يُعرض شيء (لا نفتعل بيانات حدود غير حقيقية لدول ليس لدينا مناطق تحميل
+     * فعلية لها).
      */
     private fun checkOfflineRegionsForVisibleArea(map: MapLibreMap) {
-        val visible = map.projection.visibleRegion.latLngBounds
-        val candidates = OfflineRegionDef.intersecting(visible)
+        val loc = lastLocation ?: return
+        val candidates = OfflineRegionDef.containing(loc.latitude, loc.longitude)
             .filterNot { it.id in downloadedRegionIds || it.id in downloadingRegionIds }
         if (candidates.isEmpty()) {
             lastOfflinePromptKey = null
@@ -493,7 +980,7 @@ class MainActivity : AppCompatActivity() {
     private fun promptDownload(candidates: List<OfflineRegionDef>) {
         if (candidates.size == 1) {
             val def = candidates[0]
-            AlertDialog.Builder(this)
+            AlertDialog.Builder(this, R.style.Theme_DalilAlBar_NeonDialog)
                 .setTitle("تحميل الخريطة دون انترنت")
                 .setMessage("هل تريد تحميل خريطة ${def.arabicName} لاستخدامها بلا انترنت؟")
                 .setPositiveButton("تحميل") { _, _ -> downloadRegions(listOf(def)) }
@@ -501,7 +988,7 @@ class MainActivity : AppCompatActivity() {
                 .show()
         } else {
             val checked = BooleanArray(candidates.size) { true }
-            AlertDialog.Builder(this)
+            AlertDialog.Builder(this, R.style.Theme_DalilAlBar_NeonDialog)
                 .setTitle("تحميل الخريطة دون انترنت")
                 .setMultiChoiceItems(candidates.map { it.arabicName }.toTypedArray(), checked) { _, which, isChecked ->
                     checked[which] = isChecked
@@ -526,24 +1013,78 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val def = queue.removeAt(0)
-        binding.status.visibility = View.VISIBLE
-        binding.status.text = "جارٍ تحميل خريطة ${def.arabicName}… ٠٪"
+        showDownloadProgressDialog(def, queue)
+    }
+
+    /** نافذة تقدّم تحميل مركزية: شريط + نسبة مئوية + أزرار توقف مؤقت/إلغاء/تحميل في الخلفية، كما طُلب
+     * صراحة بدل تحديث شريط حالة علوي بسيط فقط. "تحميل في الخلفية" يُغلق هذه النافذة فحسب — التحميل
+     * نفسه يتابع في خدمة MapLibre الخلفية (OfflineManager) بصرف النظر عن ظهور أي واجهة له. */
+    private fun showDownloadProgressDialog(def: OfflineRegionDef, queue: MutableList<OfflineRegionDef>) {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_download_progress, null)
+        val tvName = dialogView.findViewById<android.widget.TextView>(R.id.tvDownloadRegionName)
+        val progressBar = dialogView.findViewById<android.widget.ProgressBar>(R.id.progressBarDownload)
+        val tvPercent = dialogView.findViewById<android.widget.TextView>(R.id.tvDownloadPercent)
+        val btnPause = dialogView.findViewById<android.widget.Button>(R.id.btnDownloadPause)
+        val btnCancel = dialogView.findViewById<android.widget.Button>(R.id.btnDownloadCancel)
+        val btnBackground = dialogView.findViewById<android.widget.Button>(R.id.btnDownloadBackground)
+        tvName.text = def.arabicName
+
+        var currentRegion: org.maplibre.android.offline.OfflineRegion? = null
+        var isPaused = false
+
+        val dialog = AlertDialog.Builder(this, R.style.Theme_DalilAlBar_NeonDialog)
+            .setView(dialogView)
+            .setCancelable(false)
+            .create()
+
+        btnPause.setOnClickListener {
+            val region = currentRegion ?: return@setOnClickListener
+            isPaused = !isPaused
+            if (isPaused) {
+                offlineController.pauseDownload(region)
+                btnPause.text = getString(R.string.download_resume)
+            } else {
+                offlineController.resumeDownload(region)
+                btnPause.text = getString(R.string.download_pause)
+            }
+        }
+        btnCancel.setOnClickListener {
+            val region = currentRegion
+            downloadingRegionIds.remove(def.id)
+            dialog.dismiss()
+            if (region != null) {
+                offlineController.cancelDownload(region) { }
+            }
+            Toast.makeText(this, getString(R.string.download_cancelled, def.arabicName), Toast.LENGTH_SHORT).show()
+            downloadNextOfflineRegion(queue)
+        }
+        btnBackground.setOnClickListener {
+            // لا يوقف ولا يُلغي شيئاً — فقط يُخفي النافذة؛ التحميل يتابع فعلياً في الخلفية.
+            dialog.dismiss()
+        }
+
+        dialog.show()
+
         offlineController.startDownload(
             def,
             object : OfflineRegionsController.ProgressListener {
-                override fun onProgress(d: OfflineRegionDef, percent: Int) {
-                    binding.status.text = "جارٍ تحميل خريطة ${d.arabicName}… $percent٪"
+                override fun onProgress(d: OfflineRegionDef, percent: Int, region: org.maplibre.android.offline.OfflineRegion) {
+                    currentRegion = region
+                    progressBar.progress = percent
+                    tvPercent.text = "$percent%"
                 }
 
                 override fun onComplete(d: OfflineRegionDef) {
                     downloadingRegionIds.remove(d.id)
                     downloadedRegionIds.add(d.id)
+                    if (dialog.isShowing) dialog.dismiss()
                     downloadNextOfflineRegion(queue)
                 }
 
                 override fun onDownloadError(d: OfflineRegionDef, message: String) {
                     downloadingRegionIds.remove(d.id)
-                    binding.status.text = "تعذّر تحميل خريطة ${d.arabicName}: $message"
+                    if (dialog.isShowing) dialog.dismiss()
+                    Toast.makeText(this@MainActivity, "تعذّر تحميل خريطة ${d.arabicName}: $message", Toast.LENGTH_LONG).show()
                     downloadNextOfflineRegion(queue)
                 }
             }
@@ -565,11 +1106,15 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         binding.map.onResume()
+        rotationSensor?.let {
+            sensorManager.registerListener(orientationListener, it, SensorManager.SENSOR_DELAY_UI)
+        }
     }
 
     override fun onPause() {
         super.onPause()
         binding.map.onPause()
+        sensorManager.unregisterListener(orientationListener)
     }
 
     override fun onStop() {
