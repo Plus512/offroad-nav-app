@@ -23,11 +23,28 @@
         <item name="buttonBarPositiveButtonStyle">@style/Widget.DalilAlBar.NeonDialogButton</item>
         <item name="buttonBarNegativeButtonStyle">@style/Widget.DalilAlBar.NeonDialogButton</item>
         <item name="buttonBarNeutralButtonStyle">@style/Widget.DalilAlBar.NeonDialogButton</item>
+        <!-- هذه الأسطر الثلاثة (بادئة android:) هي السبب الحقيقي لبقاء عناصر setItems() وزر "إلغاء"
+             بالأسود رغم تلوين العنوان بنجاح: الحوار يُبنى في الكود عبر android.app.AlertDialog (الكلاس
+             الأصلي من النظام)، وهذا الكلاس يقرأ فقط خصائص الثيم ذات بادئة android:، بينما كل ما أعلاه
+             من buttonBarPositiveButtonStyle/colorSurface/... بلا بادئة هي خصائص مكتبة AppCompat/Material
+             ولا يراها AlertDialog الأصلي إطلاقاً - لذلك كانت بلا أثر على الأزرار وعناصر setItems(). -->
+        <item name="android:textColorAlertDialogListItem">@color/neon_green</item>
+        <item name="android:buttonBarPositiveButtonStyle">@style/Widget.DalilAlBar.NeonDialogButton.Framework</item>
+        <item name="android:buttonBarNegativeButtonStyle">@style/Widget.DalilAlBar.NeonDialogButton.Framework</item>
+        <item name="android:buttonBarNeutralButtonStyle">@style/Widget.DalilAlBar.NeonDialogButton.Framework</item>
     </style>
 
     <style name="Widget.DalilAlBar.NeonDialogButton" parent="Widget.MaterialComponents.Button.TextButton">
         <item name="android:textColor">@color/neon_green_bright</item>
         <item name="fontFamily">monospace</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <!-- نفس تنسيق الزر أعلاه، لكن بأصل (parent) من إطار العمل نفسه (android:) كي يلتقطه
+         android.app.AlertDialog الأصلي عبر android:buttonBarPositiveButtonStyle وأخواتها. -->
+    <style name="Widget.DalilAlBar.NeonDialogButton.Framework" parent="@android:style/Widget.Holo.Button.Borderless.Small">
+        <item name="android:textColor">@color/neon_green_bright</item>
+        <item name="android:fontFamily">monospace</item>
         <item name="android:textStyle">bold</item>
     </style>
 

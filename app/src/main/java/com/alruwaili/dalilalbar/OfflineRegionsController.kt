@@ -103,7 +103,12 @@ class OfflineRegionsController(private val context: Context) {
             STYLE_URL,
             def.bounds,
             5.0,
-            Double.POSITIVE_INFINITY, // يقتصر تلقائياً على أعلى مستوى تكبير تقدّمه بيانات OpenFreeMap لكل مصدر
+            // 14.0: أعلى مستوى تكبير تقدّمه بيانات OpenFreeMap الشعاعية (planet) فعلياً — تم التحقق منه
+            // من ملف النمط الأصلي (maxzoom:14 لكل الطبقات التفصيلية). كانت القيمة سابقاً
+            // Double.POSITIVE_INFINITY، وهذا على الأغلب هو سبب تجمّد التحميل عند 0% دون أي استجابة:
+            // OfflineManager يحاول حساب عدد البلاطات المطلوبة عبر مدى غير محدود من مستويات التكبير،
+            // فلا تكتمل العملية أبداً ولا يصل أي حدث onStatusChanged لتحديث الواجهة.
+            14.0,
             context.resources.displayMetrics.density
         )
         val metadata = JSONObject().put(JSON_FIELD_REGION_ID, def.id).toString().toByteArray(JSON_CHARSET)
