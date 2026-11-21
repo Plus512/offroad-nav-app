@@ -38,6 +38,34 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent" />
 
+    <!-- زر القائمة/الإعدادات أسفل يسار الشاشة. هامش سفلي أكبر من المعتاد (٤٠dp) كي لا يتداخل مع
+         شريط إسناد الخريطة (attribution) الملاصق لحافة الشاشة السفلية في نفس الزاوية. -->
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/fabMenu"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginLeft="16dp"
+        android:layout_marginBottom="40dp"
+        android:contentDescription="@string/menu_settings"
+        app:srcCompat="@drawable/ic_menu_hamburger"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintLeft_toLeftOf="parent"
+        tools:ignore="RtlHardcoded" />
+
+    <!-- زر إنهاء الرحلة النشطة: مخفي افتراضياً، يظهر فقط بعد اختيار وجهة وبدء الملاحة. -->
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/fabEndTrip"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginLeft="16dp"
+        android:layout_marginTop="16dp"
+        android:visibility="gone"
+        android:contentDescription="@string/end_trip"
+        app:srcCompat="@android:drawable/ic_menu_close_clear_cancel"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintLeft_toLeftOf="parent"
+        tools:ignore="RtlHardcoded" />
+
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/fabLocate"
         android:layout_width="wrap_content"
@@ -88,5 +116,20 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- زر رجوع/إغلاق صريح داخل لوحة البوصلة نفسها (أعلى يسارها)، بدل الاعتماد فقط على إعادة الضغط
+         على سهم البوصلة العلوي. مخفي/ظاهر بنفس حالة ظهور اللوحة. -->
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/fabCloseCompassPanel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginLeft="12dp"
+        android:layout_marginTop="12dp"
+        android:visibility="gone"
+        android:contentDescription="@string/close_compass_panel"
+        app:srcCompat="@android:drawable/ic_menu_close_clear_cancel"
+        app:layout_constraintTop_toTopOf="@id/compassPanel"
+        app:layout_constraintLeft_toLeftOf="@id/compassPanel"
+        tools:ignore="RtlHardcoded" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

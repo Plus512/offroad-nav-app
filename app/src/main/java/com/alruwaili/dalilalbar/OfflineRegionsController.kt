@@ -44,6 +44,35 @@ class OfflineRegionsController(private val context: Context) {
         })
     }
 
+    /** كل المناطق المحمَّلة فعلاً حالياً، مع كائن OfflineRegion نفسه (مطلوب لحذفها). تُستخدم في شاشة الإعدادات. */
+    fun listDownloadedRegions(callback: (List<Pair<String, OfflineRegion>>) -> Unit) {
+        manager.listOfflineRegions(object : OfflineManager.ListOfflineRegionsCallback {
+            override fun onList(offlineRegions: Array<OfflineRegion>?) {
+                val pairs = (offlineRegions ?: emptyArray()).mapNotNull { region ->
+                    regionIdOf(region)?.let { id -> id to region }
+                }
+                callback(pairs)
+            }
+
+            override fun onError(error: String) {
+                callback(emptyList())
+            }
+        })
+    }
+
+    /** يحذف منطقة محمَّلة دون انترنت نهائياً (تحرير مساحة التخزين). */
+    fun deleteRegion(region: OfflineRegion, onDone: (success: Boolean) -> Unit) {
+        region.delete(object : OfflineRegion.OfflineRegionDeleteCallback {
+            override fun onDelete() {
+                onDone(true)
+            }
+
+            override fun onError(error: String) {
+                onDone(false)
+            }
+        })
+    }
+
     private fun regionIdOf(region: OfflineRegion): String? = try {
         val json = JSONObject(String(region.metadata, JSON_CHARSET))
         json.optString(JSON_FIELD_REGION_ID).ifBlank { null }

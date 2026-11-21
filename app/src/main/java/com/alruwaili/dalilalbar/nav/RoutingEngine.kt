@@ -35,6 +35,21 @@ object RoutingEngine {
     private const val MIN_PAD_DEGREES = 0.01
     private const val MAX_BBOX_SIDE_DEGREES = 1.6 // ≈ حد أقصى عملي لحجم استعلام Overpass الواحد
 
+    // نصف عرض "ممر" البحث عن الطرق الحقيقية بمحاذاة خط السير المستقيم بين الانطلاق والوجهة، عند
+    // مسافات طويلة جداً يتعذّر فيها استعلام مربع كامل واحد. ١٦ كم (عرض كامل ٣٢ كم) كافٍ عملياً للعثور
+    // على الطريق الفعلي الذي يتبعه السائق، مهما طالت المسافة (حتى مئات الكيلومترات)، دون استعلام
+    // بحجم غير عملي.
+    private const val CORRIDOR_HALF_WIDTH_METERS = 16000.0
+
+    // نصف ضلع مربع بحث محلي إضافي حول كل من نقطتي الانطلاق والوجهة (وليس فقط داخل الممر المستقيم)،
+    // لالتقاط أي طريق حقيقي قريب قد يقع جانبياً خارج الممر تماماً — كما في حالة وجهة تبعد عن أقرب
+    // طريق بمقدار يصل إلى نحو ١٠٠ كم جانبياً، كما وصف المستخدم تحديداً. ١ درجة ≈ ١١٠ كم.
+    private const val ENDPOINT_LOCAL_HALF_DEGREES = 1.0
+
+    // حدّ أقصى معقول لمسافة "آخر ميل" المستقيمة من/إلى أقرب طريق حقيقي عند المسافات الطويلة، كي لا
+    // يُقبل تسديد غير منطقي لطريق بعيد جداً فعلياً عن أي من النقطتين (وليس قيداً تعسفياً صغيراً كسابقه).
+    private const val LONG_ROUTE_MAX_SNAP_METERS = 150000.0
+
     private val mainHandler = Handler(Looper.getMainLooper())
 
     fun computeRoute(user: LatLng, destination: LatLng, mode: NavMode, callback: (RouteOutcome) -> Unit) {
@@ -80,10 +95,10 @@ object RoutingEngine {
         south -= latPad; north += latPad; west -= lonPad; east += lonPad
 
         if ((north - south) > MAX_BBOX_SIDE_DEGREES || (east - west) > MAX_BBOX_SIDE_DEGREES) {
-            return straightFallback(
-                user, destination, straightDistance,
-                "المسافة بين نقطة الانطلاق والوجهة كبيرة جداً لاستعلام طرق حقيقي واحد"
-            )
+            // المسافة كبيرة جداً لاستعلام مربع كامل واحد. بدلاً من الاستسلام لخط مستقيم كامل فوراً،
+            // نتتبّع الطريق الحقيقي الفعلي مهما طالت المسافة عبر استعلام "ممر" ضيّق بمحاذاة خط السير،
+            // ولا نرسم خطاً مستقيماً إلا للفجوة الأخيرة غير المتصلة بطريق قرب الوجهة (أو قرب الانطلاق).
+            return computeLongDistanceCarRoute(user, destination, straightDistance)
         }
 
         val network = try {
@@ -120,12 +135,93 @@ object RoutingEngine {
         )
     }
 
+    /**
+     * عندما تكون المسافة بين نقطة الانطلاق والوجهة كبيرة جداً لاستعلام مربع واحد يغطيهما معاً، نتتبّع
+     * الطريق الحقيقي الفعلي مهما طالت المسافة (حتى مئات الكيلومترات)، كما طلب المستخدم تحديداً: عبر
+     * استعلام "ممر" ضيّق بمحاذاة خط السير المستقيم بين النقطتين (باستخدام مرشِّح poly في Overpass QL،
+     * محقَّق من توثيقه الرسمي)، مع استعلامين محليين إضافيين حول كل من نقطتي الانطلاق والوجهة لالتقاط
+     * أي طريق حقيقي قريب قد يقع جانبياً خارج الممر المستقيم تماماً. لا يُرسم خط مستقيم إلا للفجوة
+     * الأخيرة غير المتصلة بأي طريق حقيقي (قرب الانطلاق و/أو قرب الوجهة) — وليس للمسافة الطويلة كلها.
+     */
+    private fun computeLongDistanceCarRoute(user: LatLng, destination: LatLng, straightDistance: Double): RouteOutcome {
+        val tooFarReason = "المسافة بين نقطة الانطلاق والوجهة (${GeoMath.formatDistance(straightDistance)}) كبيرة جداً " +
+            "لاستعلام مربع كامل واحد؛ استُخدم بحث بالممر مع الطريق الحقيقي بدلاً من ذلك"
+
+        val bearing = GeoMath.bearingDegrees(user, destination)
+        val leftBearing = (bearing - 90.0 + 360.0) % 360.0
+        val rightBearing = (bearing + 90.0) % 360.0
+        val corridorPolygon = listOf(
+            GeoMath.destinationPoint(user, leftBearing, CORRIDOR_HALF_WIDTH_METERS),
+            GeoMath.destinationPoint(destination, leftBearing, CORRIDOR_HALF_WIDTH_METERS),
+            GeoMath.destinationPoint(destination, rightBearing, CORRIDOR_HALF_WIDTH_METERS),
+            GeoMath.destinationPoint(user, rightBearing, CORRIDOR_HALF_WIDTH_METERS)
+        )
+
+        val networks = ArrayList<RoadNetwork>()
+        try {
+            networks.add(OverpassClient.fetchRoadNetworkInPolygon(corridorPolygon))
+        } catch (e: OverpassClient.OverpassException) {
+            return straightFallback(
+                user, destination, straightDistance,
+                "$tooFarReason، وتعذّر جلب بيانات الممر (${e.message ?: "خطأ اتصال"})"
+            )
+        }
+
+        fun localNetwork(center: LatLng): RoadNetwork? = try {
+            OverpassClient.fetchRoadNetwork(
+                center.latitude - ENDPOINT_LOCAL_HALF_DEGREES,
+                center.longitude - ENDPOINT_LOCAL_HALF_DEGREES,
+                center.latitude + ENDPOINT_LOCAL_HALF_DEGREES,
+                center.longitude + ENDPOINT_LOCAL_HALF_DEGREES
+            )
+        } catch (e: OverpassClient.OverpassException) {
+            null // تعذّر الاستعلام المحلي الإضافي ليس سبباً كافياً لإفشال كل المحاولة؛ نكتفي بالممر
+        }
+
+        localNetwork(user)?.let { networks.add(it) }
+        localNetwork(destination)?.let { networks.add(it) }
+
+        val network = OverpassClient.merge(networks)
+        if (network.ways.isEmpty()) {
+            return straightFallback(
+                user, destination, straightDistance,
+                "$tooFarReason، ولا توجد بيانات طرق/دروب حقيقية قريبة من نقطة الانطلاق أو الوجهة"
+            )
+        }
+
+        val pavedGraph = RoadGraph.build(network, includeTrack = false)
+        val pavedResult = tryRoute(pavedGraph, user, destination, LONG_ROUTE_MAX_SNAP_METERS)
+        if (pavedResult != null) {
+            return assemble(
+                user, destination, pavedResult, straightDistance,
+                reason = "$tooFarReason؛ عُثر على طريق معبّد حقيقي متصل عبر بحث بالممر"
+            )
+        }
+
+        val mixedGraph = RoadGraph.build(network, includeTrack = true)
+        val mixedResult = tryRoute(mixedGraph, user, destination, LONG_ROUTE_MAX_SNAP_METERS)
+        if (mixedResult != null) {
+            return assemble(
+                user, destination, mixedResult, straightDistance,
+                reason = "$tooFarReason؛ عُثر على طريق/درب حقيقي متصل عبر بحث بالممر"
+            )
+        }
+
+        return straightFallback(
+            user, destination, straightDistance,
+            "$tooFarReason، ولا يتصل أي طريق/درب حقيقي بين نقطة الانطلاق والوجهة حتى ضمن منطقة البحث الممتدة"
+        )
+    }
+
     private class SnappedRoute(val path: RoutePlanner.PathResult, val startSnapDist: Double, val endSnapDist: Double)
 
-    private fun tryRoute(graph: RoadGraph, user: LatLng, destination: LatLng): SnappedRoute? {
+    private fun tryRoute(
+        graph: RoadGraph, user: LatLng, destination: LatLng,
+        maxSnapDistanceMeters: Double = MAX_SNAP_DISTANCE_METERS
+    ): SnappedRoute? {
         val startSnap = graph.nearestNode(user) ?: return null
         val endSnap = graph.nearestNode(destination) ?: return null
-        if (startSnap.second > MAX_SNAP_DISTANCE_METERS || endSnap.second > MAX_SNAP_DISTANCE_METERS) return null
+        if (startSnap.second > maxSnapDistanceMeters || endSnap.second > maxSnapDistanceMeters) return null
         val path = RoutePlanner.shortestPath(graph, startSnap.first, endSnap.first) ?: return null
         return SnappedRoute(path, startSnap.second, endSnap.second)
     }

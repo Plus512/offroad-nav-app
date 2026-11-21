@@ -2,7 +2,13 @@ package com.alruwaili.dalilalbar
 
 import android.Manifest
 import android.app.AlertDialog
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.RectF
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -102,6 +108,26 @@ class MainActivity : AppCompatActivity() {
     private var lastLocationsQueryKey: String? = null
     private var locationsQueryInFlight = false
 
+    // ===== اتجاه الجهاز الحقيقي (بوصلة فعلية تدور مع دوران الهاتف، وليست رقماً ثابتاً) =====
+    private lateinit var sensorManager: SensorManager
+    private var rotationSensor: Sensor? = null
+    /** زاوية الشمال المغناطيسي/الحقيقي الحالية بالنسبة لاتجاه الهاتف، محدَّثة من حسّاس الجهاز فعلياً. */
+    private var deviceAzimuthDegrees: Float = 0f
+    private val rotationRaw = FloatArray(9)
+    private val orientationRaw = FloatArray(3)
+
+    private val orientationListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            SensorManager.getRotationMatrixFromVector(rotationRaw, event.values)
+            SensorManager.getOrientation(rotationRaw, orientationRaw)
+            val azimuthDeg = Math.toDegrees(orientationRaw[0].toDouble())
+            deviceAzimuthDegrees = (((azimuthDeg + 360.0) % 360.0)).toFloat()
+            refreshCompassAndPanel()
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
+
     private val requestLocationPermission =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
             val granted = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
@@ -124,6 +150,9 @@ class MainActivity : AppCompatActivity() {
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
         trackRecorder = TrackRecorder(applicationContext)
         locationsRepository = LocationsRepository(applicationContext)
+
+        sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
+        rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
 
         offlineController = OfflineRegionsController(applicationContext)
         offlineController.listDownloadedIds { ids -> downloadedRegionIds.addAll(ids) }
@@ -162,7 +191,12 @@ class MainActivity : AppCompatActivity() {
 
         binding.fabLocate.setOnClickListener { centerOnMyLocation() }
         binding.fabTrackRecord.setOnClickListener { toggleTrackRecording() }
+        binding.fabMenu.setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
         binding.compassArrow.setOnClickListener { toggleSplitView() }
+        binding.fabCloseCompassPanel.setOnClickListener { toggleSplitView() }
+        binding.fabEndTrip.setOnClickListener { endTrip() }
 
         if (hasLocationPermission()) {
             startLocating()
@@ -246,12 +280,53 @@ class MainActivity : AppCompatActivity() {
         }
         val userLatLng = LatLng(loc.latitude, loc.longitude)
         val distance = GeoMath.distanceMeters(userLatLng, point)
-        showNavigationChoiceDialog(userLatLng, point, distance)
+        val placeName = findPlaceNameAt(point)
+        showNavigationChoiceDialog(userLatLng, point, distance, placeName)
     }
 
-    private fun showNavigationChoiceDialog(user: LatLng, destination: LatLng, distance: Double) {
+    /**
+     * يبحث عن اسم موقع عند نقطة اللمس، إن وُجد: أولاً من طبقة مواقع المستخدم الخاصة (locations.db)،
+     * ثم من طبقات الأماكن/المعالم في الخريطة الأساسية نفسها (poi/place من style_dalil.json، بنفس
+     * ترتيب أولوية الاسم المستخدَم في تلك الطبقات: name:ar ثم name:nonlatin ثم name_en ثم name).
+     * يُعيد null إن لم يُلمَس أي عنصر مسمّى فعلياً (لا تخمين لاسم غير موجود).
+     */
+    private fun findPlaceNameAt(point: LatLng): String? {
+        val map = mapLibreMapOrNull ?: return null
+        val screenPoint = map.projection.toScreenLocation(point)
+        val tolerance = dp(24).toFloat()
+        val rect = RectF(
+            screenPoint.x - tolerance, screenPoint.y - tolerance,
+            screenPoint.x + tolerance, screenPoint.y + tolerance
+        )
+
+        map.queryRenderedFeatures(rect, "locations-labels-layer").firstOrNull()?.let { feature ->
+            val title = feature.getStringProperty("title")
+            if (!title.isNullOrBlank()) return title
+        }
+
+        val styleLabelLayers = arrayOf(
+            "poi_r20", "poi_r7", "poi_r1", "poi_transit",
+            "label_other", "label_village", "label_town", "label_city"
+        )
+        val features = map.queryRenderedFeatures(rect, *styleLabelLayers)
+        for (feature in features) {
+            val name = feature.getStringProperty("name:ar")
+                ?: feature.getStringProperty("name:nonlatin")
+                ?: feature.getStringProperty("name_en")
+                ?: feature.getStringProperty("name")
+            if (!name.isNullOrBlank()) return name
+        }
+        return null
+    }
+
+    private fun showNavigationChoiceDialog(user: LatLng, destination: LatLng, distance: Double, placeName: String?) {
+        val title = if (placeName != null) {
+            getString(R.string.distance_to_named_point, placeName, GeoMath.formatDistance(distance))
+        } else {
+            getString(R.string.distance_to_point, GeoMath.formatDistance(distance))
+        }
         AlertDialog.Builder(this)
-            .setTitle(getString(R.string.distance_to_point, GeoMath.formatDistance(distance)))
+            .setTitle(title)
             .setItems(arrayOf(getString(R.string.mode_straight), getString(R.string.mode_car))) { _, which ->
                 val mode = if (which == 0) NavMode.STRAIGHT else NavMode.CAR
                 startRouting(user, destination, mode)
@@ -262,6 +337,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun startRouting(user: LatLng, destination: LatLng, mode: NavMode) {
         activeDestination = destination
+        binding.fabEndTrip.visibility = View.VISIBLE
         binding.status.visibility = View.VISIBLE
         binding.status.text = getString(R.string.computing_route)
         RoutingEngine.computeRoute(user, destination, mode) { outcome ->
@@ -271,6 +347,21 @@ class MainActivity : AppCompatActivity() {
             refreshCompassAndPanel()
             outcome.fallbackReason?.let { reason -> Toast.makeText(this, reason, Toast.LENGTH_LONG).show() }
         }
+    }
+
+    /** ينهي الرحلة النشطة: يمسح المسار المرسوم وعلامة الوجهة، ويعيد البوصلة واللوحة لوضعهما الافتراضي. */
+    private fun endTrip() {
+        activeDestination = null
+        splitViewVisible = false
+        binding.compassPanel.visibility = View.GONE
+        binding.fabCloseCompassPanel.visibility = View.GONE
+        binding.fabEndTrip.visibility = View.GONE
+        val style = loadedStyle
+        style?.getSourceAs<GeoJsonSource>("route-solid-source")?.setGeoJson(FeatureCollection.fromFeatures(emptyArray()))
+        style?.getSourceAs<GeoJsonSource>("route-straight-source")?.setGeoJson(FeatureCollection.fromFeatures(emptyArray()))
+        style?.getSourceAs<GeoJsonSource>("dest-marker-source")?.setGeoJson(FeatureCollection.fromFeatures(emptyArray()))
+        refreshCompassAndPanel()
+        Toast.makeText(this, R.string.trip_ended, Toast.LENGTH_SHORT).show()
     }
 
     /** يضيف طبقتي خط المسار (حلّة واحدة ملوّنة حسب معبّد/درب) وخط الاتصال المستقيم (منقّط)، وطبقة علامة الوجهة. */
@@ -297,7 +388,9 @@ class MainActivity : AppCompatActivity() {
             LineLayer("route-straight-layer", "route-straight-source").withProperties(
                 PropertyFactory.lineWidth(5f),
                 PropertyFactory.lineColor("#202020"),
-                PropertyFactory.lineDasharray(arrayOf(0f, 2f))
+                // كان هذا النمط مكتوباً خطأً [0, 2] سابقاً (أي خط بطول صفر) فكان الخط غير مرئي تماماً
+                // رغم رسمه فعلياً في الخلفية — هذا هو السبب الحقيقي وراء "الخط المستقيم لا يظهر".
+                PropertyFactory.lineDasharray(arrayOf(2f, 2f))
             )
         )
 
@@ -417,25 +510,34 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    /** يحدّث اتجاه السهم (شمال افتراضياً، أو نحو الوجهة بعد اختيارها) ونص لوحة البوصلة إن كانت ظاهرة. */
+    /**
+     * يحدّث اتجاه السهم ونص لوحة البوصلة. الاتجاه الجغرافي الفعلي (نحو الشمال افتراضياً، أو نحو
+     * الوجهة بعد اختيارها) يُحسب من الإحداثيات كما كان، لكن زاوية رسم السهم على الشاشة الآن تُطرح
+     * منها زاوية اتجاه الجهاز الحقيقية (deviceAzimuthDegrees، من حسّاس دوران الجهاز الفعلي) — فيصبح
+     * السهم بوصلة فعلية تدور مع دوران الهاتف (يشير دائماً إلى الاتجاه الحقيقي بصرف النظر عن وضعية
+     * إمساكك للجهاز)، لا رقماً ثابتاً كما كان سابقاً. النص (الدرجة ونص الجهة) يبقى الاتجاه الجغرافي
+     * الموضوعي نفسه (غير متأثر بدوران الجهاز)، لأنه قراءة معلوماتية لا إبرة بصرية.
+     */
     private fun refreshCompassAndPanel() {
         val destination = activeDestination
         val loc = lastLocation
-        if (destination == null || loc == null) {
-            binding.compassArrow.pointsToDestination = false
-            binding.compassArrow.headingDegrees = 0f
-            return
+        val hasTarget = destination != null && loc != null
+        val targetBearing = if (hasTarget) {
+            GeoMath.bearingDegrees(LatLng(loc!!.latitude, loc.longitude), destination!!)
+        } else {
+            0.0 // لا وجهة مختارة: تعمل كبوصلة عادية تشير إلى الشمال الحقيقي
         }
-        val userLatLng = LatLng(loc.latitude, loc.longitude)
-        val bearing = GeoMath.bearingDegrees(userLatLng, destination)
-        binding.compassArrow.headingDegrees = bearing.toFloat()
-        binding.compassArrow.pointsToDestination = true
+        val displayHeading = (((targetBearing - deviceAzimuthDegrees) % 360.0) + 360.0) % 360.0
 
-        if (splitViewVisible) {
-            val distance = GeoMath.distanceMeters(userLatLng, destination)
-            binding.compassPanel.bearingDegrees = bearing.toFloat()
+        binding.compassArrow.headingDegrees = displayHeading.toFloat()
+        binding.compassArrow.pointsToDestination = hasTarget
+
+        if (splitViewVisible && hasTarget) {
+            val userLatLng = LatLng(loc!!.latitude, loc.longitude)
+            val distance = GeoMath.distanceMeters(userLatLng, destination!!)
+            binding.compassPanel.bearingDegrees = displayHeading.toFloat()
             binding.compassPanel.bearingLabelText =
-                "الاتجاه: ${Math.round(bearing)} درجة ${GeoMath.compassLabelArabic(bearing)}"
+                "الاتجاه: ${Math.round(targetBearing)} درجة ${GeoMath.compassLabelArabic(targetBearing)}"
             binding.compassPanel.distanceText = "المسافة المتبقية: ${GeoMath.formatDistance(distance)}"
             binding.compassPanel.elevationText = if (loc.hasAltitude()) {
                 "الارتفاع: ${Math.round(loc.altitude)} م"
@@ -449,6 +551,7 @@ class MainActivity : AppCompatActivity() {
         if (activeDestination == null) return
         splitViewVisible = !splitViewVisible
         binding.compassPanel.visibility = if (splitViewVisible) View.VISIBLE else View.GONE
+        binding.fabCloseCompassPanel.visibility = if (splitViewVisible) View.VISIBLE else View.GONE
         if (splitViewVisible) refreshCompassAndPanel()
     }
 
@@ -471,14 +574,29 @@ class MainActivity : AppCompatActivity() {
     // ===================== تحميل الخريطة دون انترنت (من دفعة سابقة، دون تعديل) =====================
 
     /**
-     * يفحص المنطقة المرئية حالياً على الخريطة: إن كانت تتقاطع مع منطقة (دولة/جزء من السعودية) لم
-     * تُحمَّل دون انترنت ولا يجري تحميلها الآن، يعرض سؤال التحميل. يتكرر هذا الفحص تلقائياً مع كل
-     * توقّف للكاميرا (بعد أول تحديد لموقع المستخدم عند فتح التطبيق، وبعد كل عملية تكبير/تصغير أو
-     * تحريك) — فإذا رفض المستخدم التحميل، سيُسأل مرة أخرى عند تكبير/تحريك يغيّر المنطقة المعروضة.
+     * أول مرة فقط في عمر التطبيق: تُعرض قائمة بكل الدول/المناطق المتاحة للتحميل دفعة واحدة (بصرف
+     * النظر عن منطقة العرض الحالية)، ولا تُعرض هذه القائمة الكاملة مرة أخرى أبداً بعد ذلك (محفوظة
+     * في SharedPreferences، بصرف النظر عن اختيار المستخدم). في كل مرة لاحقة: يُفحص فقط موقع المستخدم
+     * الفعلي الحالي (lastLocation)، وإن كانت الدولة التي يتواجد فيها غير محمَّلة دون انترنت ولا يجري
+     * تحميلها الآن، يُعرض سؤال تحميل تلك الدولة وحدها (لا قائمة الدول الأخرى). يتكرر هذا الفحص تلقائياً
+     * مع كل توقّف للكاميرا.
      */
     private fun checkOfflineRegionsForVisibleArea(map: MapLibreMap) {
-        val visible = map.projection.visibleRegion.latLngBounds
-        val candidates = OfflineRegionDef.intersecting(visible)
+        val prefs = getSharedPreferences("dalilalbar_prefs", MODE_PRIVATE)
+        if (!prefs.getBoolean("shown_initial_offline_list", false)) {
+            // أول مرة فقط في عمر التطبيق: تُعرض كل الدول دفعة واحدة، بصرف النظر عن المنطقة المرئية حالياً،
+            // ولا يُعاد عرض هذه القائمة الكاملة مطلقاً بعد ذلك (العلامة محفوظة دائماً، حتى لو أُغلقت دون تحميل).
+            prefs.edit().putBoolean("shown_initial_offline_list", true).apply()
+            val allCandidates = OfflineRegionDef.entries
+                .filterNot { it.id in downloadedRegionIds || it.id in downloadingRegionIds }
+            if (allCandidates.isNotEmpty()) {
+                promptDownload(allCandidates)
+            }
+            return
+        }
+        // بعد المرة الأولى: لا تُعرض القائمة الكاملة مجدداً، بل فقط الدولة التي يتواجد فيها المستخدم فعلياً الآن.
+        val loc = lastLocation ?: return
+        val candidates = OfflineRegionDef.containing(loc.latitude, loc.longitude)
             .filterNot { it.id in downloadedRegionIds || it.id in downloadingRegionIds }
         if (candidates.isEmpty()) {
             lastOfflinePromptKey = null
@@ -565,11 +683,15 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         binding.map.onResume()
+        rotationSensor?.let {
+            sensorManager.registerListener(orientationListener, it, SensorManager.SENSOR_DELAY_UI)
+        }
     }
 
     override fun onPause() {
         super.onPause()
         binding.map.onPause()
+        sensorManager.unregisterListener(orientationListener)
     }
 
     override fun onStop() {

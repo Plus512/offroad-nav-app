@@ -2,6 +2,7 @@ package com.alruwaili.dalilalbar.nav
 
 import org.maplibre.android.geometry.LatLng
 import java.util.Locale
+import kotlin.math.asin
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.pow
@@ -45,6 +46,25 @@ object GeoMath {
         )
         val idx = (((bearing % 360) + 360) % 360 / 45.0).let { Math.round(it).toInt() % 8 }
         return dirs[idx]
+    }
+
+    /**
+     * نقطة الوصول عند السير مسافة معيّنة بالأمتار من نقطة بداية باتجاه (bearing) معيّن — الصيغة
+     * الجيوديسية الكروية القياسية المعاكسة لصيغة bearingDegrees (معروفة في علم الملاحة، وليست تخميناً).
+     * تُستخدم لبناء ضلعي "ممر" البحث عن الطرق الحقيقية بمحاذاة خط السير بين نقطتين بعيدتين جداً.
+     */
+    fun destinationPoint(start: LatLng, bearingDegrees: Double, distanceMeters: Double): LatLng {
+        val delta = distanceMeters / EARTH_RADIUS_METERS
+        val theta = Math.toRadians(bearingDegrees)
+        val phi1 = Math.toRadians(start.latitude)
+        val lambda1 = Math.toRadians(start.longitude)
+
+        val phi2 = asin(sin(phi1) * cos(delta) + cos(phi1) * sin(delta) * cos(theta))
+        val lambda2 = lambda1 + atan2(
+            sin(theta) * sin(delta) * cos(phi1),
+            cos(delta) - sin(phi1) * sin(phi2)
+        )
+        return LatLng(Math.toDegrees(phi2), Math.toDegrees(lambda2))
     }
 
     fun formatDistance(meters: Double): String {
