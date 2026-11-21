@@ -32,7 +32,7 @@
     </style>
 
     <!-- نص "رقمي" عام (عناوين/أجسام نصوص شاشة الإعدادات) -->
-    <style name="TextAppearance.DalilAlBar.NeonDigital">
+    <style name="TextAppearance.DalilAlBar.NeonDigital" parent="@android:style/TextAppearance">
         <item name="android:fontFamily">monospace</item>
         <item name="android:textStyle">bold</item>
         <item name="android:textColor">@color/neon_green</item>
