@@ -4,6 +4,10 @@ import android.Manifest
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color as AndroidColor
+import android.graphics.Paint
 import android.graphics.RectF
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -183,6 +187,7 @@ class MainActivity : AppCompatActivity() {
                 .build()
             map.setStyle(Style.Builder().fromUri("asset://style_dalil.json")) { style ->
                 loadedStyle = style
+                style.addImage("qa_khabra_pattern", buildQaKhabraPatternBitmap())
                 tryActivateLocationComponent()
                 setupNavigationLayers(style)
                 setupLocationsLabelsLayer(style)
@@ -345,6 +350,29 @@ class MainActivity : AppCompatActivity() {
         val line = LineString.fromLngLats(listOf(Point.fromLngLat(start.longitude, start.latitude), Point.fromLngLat(center.longitude, center.latitude)))
         loadedStyle?.getSourceAs<GeoJsonSource>("measure-line-source")
             ?.setGeoJson(FeatureCollection.fromFeatures(arrayOf(Feature.fromGeometry(line))))
+    }
+
+    /**
+     * نسيج تهشير مائل (diagonal hatching) أزرق على خلفية شفافة، يُستخدم لتمييز مناطق "قاع/خبرة"
+     * (منخفضات تجمُّع مياه موسمية — مستنقعات مائية موسمية وليست مياهاً دائمة) بصرياً عن باقي تضاريس
+     * الصحراء، بنفس الأسلوب الكارتوغرافي الذي لاحظه المستخدم في التطبيق المرجعي desert.maps.navigator.web.
+     * نرسمه برمجياً بدل تضمين صورة خارجية، لأن الـsprite الحالي بعيد (tiles.openfreemap.org) ولا يمكن
+     * إضافة صورة محلية إليه إلا عبر Style.addImage في الكود.
+     */
+    private fun buildQaKhabraPatternBitmap(): Bitmap {
+        val size = 16
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = AndroidColor.parseColor("#1565C0")
+            strokeWidth = 1.2f
+            style = Paint.Style.STROKE
+        }
+        // خطان متوازيان مائلان (45°) يتكرران تلقائياً كنسيج عند استخدامهما كـfill-pattern.
+        canvas.drawLine(-2f, size + 2f, size + 2f, -2f, paint)
+        canvas.drawLine(-2f + size, size + 2f, size + 2f + size, -2f, paint)
+        canvas.drawLine(-2f - size, size + 2f, size + 2f - size, -2f, paint)
+        return bitmap
     }
 
     private fun setupMeasureLayer(style: Style) {
