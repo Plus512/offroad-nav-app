@@ -8,6 +8,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color as AndroidColor
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.hardware.Sensor
 import android.hardware.SensorEvent
