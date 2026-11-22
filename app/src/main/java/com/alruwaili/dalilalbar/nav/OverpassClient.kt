@@ -20,7 +20,18 @@ import java.nio.charset.StandardCharsets
  * الخيط الرئيسي لواجهة المستخدم.
  */
 object OverpassClient {
-    private const val ENDPOINT = "https://overpass-api.de/api/interpreter"
+    // أُضيفت هذه القائمة بعد أن أبلغ المستخدم فعلياً بفشل توجيه السيارة بخطأ "HTTP 429" (طلبات كثيرة
+    // جداً) من الخادم الرئيسي overpass-api.de — وهو مُحمَّل بشدة ويحدّ معدل الطلبات لكل عنوان IP، فإن
+    // استُنفد الحد (خصوصاً بعد عدة محاولات توجيه متتالية) تُرفض حتى الطلبات التالية الصغيرة لفترة. بدل
+    // محاولة الخادم نفسه فقط، نجرّب بالترتيب ثلاثة خوادم Overpass عامة مجانية بتغطية عالمية كاملة (بلا
+    // مفتاح API)، موثَّقة فعلياً في صفحة wiki.openstreetmap.org/wiki/Overpass_API الرسمية (تحقَّقتُ منها
+    // مباشرة قبل إضافتها، وليست أسماء مخمَّنة): الرئيسي ثم VK Maps ثم private.coffee (الاسم الحالي لِما
+    // كان يُعرف سابقاً باسم overpass.kumi.systems).
+    private val ENDPOINTS = listOf(
+        "https://overpass-api.de/api/interpreter",
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter"
+    )
     // مهلة اتصال HTTP الخاصة بنا يجب أن تكون أكبر من أعلى مهلة [timeout:N] مطلوبة من خادم Overpass
     // نفسه في أي من الاستعلامات أدناه (٣٠ ثانية لاستعلام الممر)، وإلا قد نقطع الاتصال قبل أن يستجيب
     // الخادم نفسه بفشل حقيقي، فنُعامل استعلاماً لا يزال يعمل كأنه خطأ اتصال.
@@ -81,9 +92,31 @@ object OverpassClient {
     // وليس خطأً في صياغة استعلام الممر وحده، ولهذا كان توجيه السيارة يفشل حتى للمسافات القصيرة.
     private const val USER_AGENT = "DalilAlBar-Android/1.0 (offline navigation app; contact via GitHub Plus512)"
 
+    /**
+     * ينفّذ الاستعلام على خوادم [ENDPOINTS] بالترتيب: إن رفض خادم الطلب بخطأ خادم مؤقّت (429 طلبات
+     * كثيرة جداً، أو أي خطأ 5xx)، أو تعذّر الاتصال به أصلاً، يُجرَّب الخادم التالي فوراً بنفس الاستعلام
+     * بدل الفشل الكلي مباشرة. لا يُعاد تجربة نفس الخادم (التجربة باءت بالفشل فعلاً الآن)، ولا تُضاف أي
+     * فترة انتظار صناعية بين الخوادم لأنها خوادم مختلفة تماماً (لا فائدة من الانتظار قبل تجربة خادم آخر).
+     */
     @Throws(OverpassException::class)
     private fun execute(query: String): RoadNetwork {
-        val connection = URL(ENDPOINT).openConnection() as HttpURLConnection
+        var lastError: OverpassException? = null
+        for ((index, endpoint) in ENDPOINTS.withIndex()) {
+            try {
+                return executeOn(endpoint, query)
+            } catch (e: OverpassException) {
+                lastError = e
+                // نجرّب الخادم التالي فقط إن بقي خادم آخر في القائمة؛ غير ذلك نرمي الخطأ الأخير كما هو.
+                if (index == ENDPOINTS.lastIndex) throw e
+            }
+        }
+        // لا يصل التنفيذ إلى هنا عملياً (القائمة غير فارغة دائماً)، لكن مطلوب إرضاءً لنوع الإرجاع.
+        throw lastError ?: OverpassException("تعذّر الاتصال بأي من خوادم Overpass المتاحة")
+    }
+
+    @Throws(OverpassException::class)
+    private fun executeOn(endpoint: String, query: String): RoadNetwork {
+        val connection = URL(endpoint).openConnection() as HttpURLConnection
         connection.connectTimeout = TIMEOUT_MS
         connection.readTimeout = TIMEOUT_MS
         connection.requestMethod = "POST"
@@ -99,7 +132,12 @@ object OverpassClient {
 
             val code = connection.responseCode
             if (code != HttpURLConnection.HTTP_OK) {
-                throw OverpassException("استجابة غير متوقعة من خدمة Overpass: HTTP $code")
+                val reason = if (code == 429) {
+                    "الخادم مزدحم حالياً (طلبات كثيرة جداً، HTTP 429)"
+                } else {
+                    "استجابة غير متوقعة من خدمة Overpass: HTTP $code"
+                }
+                throw OverpassException(reason)
             }
             val body = connection.inputStream.bufferedReader(StandardCharsets.UTF_8).readText()
             return parse(body)

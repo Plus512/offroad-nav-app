@@ -210,6 +210,27 @@
         app:layout_constraintLeft_toLeftOf="@id/compassPanel"
         tools:ignore="RtlHardcoded" />
 
+    <!-- شريط ملاحة سفلي نحيل بخط نيون أخضر (كما وصف المستخدم تحديداً من تطبيقه الآخر): يظهر تلقائياً
+         فور اختيار "خط مستقيم" أو "سيارة" (بلا حاجة لضغط يدوي على البوصلة)، ويبقى في أسفل الشاشة طوال
+         الملاحة يعرض اسم الهدف والمسافة المتبقية والسرعة الحالية، ويُخفى تلقائياً عند إنهاء الرحلة. -->
+    <TextView
+        android:id="@+id/navInfoBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/neon_card_bg"
+        android:paddingLeft="16dp"
+        android:paddingRight="16dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="10dp"
+        android:textColor="@color/neon_green"
+        android:textSize="15sp"
+        android:lineSpacingExtra="4dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        tools:ignore="RtlHardcoded" />
+
     <!-- شريط البحث العلوي (يحل محل النافذة المنبثقة في وسط الشاشة كما طلب المستخدم تحديداً):
          شريط مستطيل ملاصق لأعلى الشاشة، مخفي افتراضياً، يظهر عند الضغط على زر البحث. -->
     <LinearLayout

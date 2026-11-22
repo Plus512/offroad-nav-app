@@ -112,6 +112,8 @@ class MainActivity : AppCompatActivity() {
     private var measuring = false
     private var measureStart: LatLng? = null
     private var activeDestination: LatLng? = null
+    // اسم الوجهة المختارة (إن وُجد) لعرضه في شريط الملاحة السفلي النيون الجديد (navInfoBar).
+    private var activeDestinationName: String? = null
     private var splitViewVisible = false
 
     private lateinit var locationsRepository: LocationsRepository
@@ -445,11 +447,26 @@ class MainActivity : AppCompatActivity() {
     private var currentSearchResults: List<LocationsRepository.LocationRow> = emptyList()
     private var pendingSearchRunnable: Runnable? = null
     private val searchDebounceHandler = Handler(Looper.getMainLooper())
+    /**
+     * محوّل مخصَّص يطبّق ألوان الثيم النيون فعلياً على كل صف (نص أخضر نيون على خلفية البطاقة الداكنة)
+     * بدل الاعتماد على نمط Android الجاهز (simple_list_item_1) الذي يرسم نصاً أسود افتراضياً — وهذا
+     * هو السبب الحقيقي الذي جعل أسماء النتائج تبدو باهتة غير مقروءة فوق خلفية القائمة الخضراء الداكنة
+     * (كان هناك تعليق سابق يذكر هذا التلوين دون أن يُنفَّذ فعلياً في الكود — تم تنفيذه الآن بالفعل).
+     */
     private val searchResultsAdapter by lazy {
-        android.widget.ArrayAdapter(
+        object : android.widget.ArrayAdapter<String>(
             this, android.R.layout.simple_list_item_1, android.R.id.text1, mutableListOf<String>()
-        ).also { adapter ->
-            // نطبّق ألوان الثيم النيون يدوياً على صفوف القائمة لأن simple_list_item_1 الجاهزة سوداء/بيضاء افتراضياً.
+        ) {
+            override fun getView(position: Int, convertView: android.view.View?, parent: android.view.ViewGroup): android.view.View {
+                val view = super.getView(position, convertView, parent)
+                val textView = view.findViewById<android.widget.TextView>(android.R.id.text1)
+                textView.setTextColor(resources.getColor(R.color.neon_green, theme))
+                textView.setBackgroundColor(resources.getColor(R.color.neon_card_bg, theme))
+                textView.textSize = 15f
+                textView.setPadding(dp(16), dp(10), dp(16), dp(10))
+                return view
+            }
+        }.also { adapter ->
             binding.lvSearchResults.adapter = adapter
         }
     }
@@ -648,8 +665,8 @@ class MainActivity : AppCompatActivity() {
                 arrayOf(getString(R.string.mode_straight), getString(R.string.mode_car), getString(R.string.save_location))
             ) { _, which ->
                 when (which) {
-                    0 -> startRouting(user, destination, NavMode.STRAIGHT)
-                    1 -> startRouting(user, destination, NavMode.CAR)
+                    0 -> startRouting(user, destination, NavMode.STRAIGHT, placeName)
+                    1 -> startRouting(user, destination, NavMode.CAR, placeName)
                     else -> showSaveLocationDialog(destination)
                 }
             }
@@ -657,11 +674,17 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun startRouting(user: LatLng, destination: LatLng, mode: NavMode) {
+    private fun startRouting(user: LatLng, destination: LatLng, mode: NavMode, placeName: String? = null) {
         activeDestination = destination
+        activeDestinationName = placeName
         binding.fabEndTrip.visibility = View.VISIBLE
         binding.status.visibility = View.VISIBLE
         binding.status.text = getString(R.string.computing_route)
+        // طُلب صراحةً: عند اختيار وجهة بعيدة عن منطقة العرض الحالية، يعيد التطبيق تلقائياً تمركز
+        // الكاميرا على موقع المستخدم الفعلي فوراً (دون انتظار نتيجة حساب المسار)، بدل بقاء الخريطة
+        // على المنطقة التي كان يتصفّحها المستخدم بعيداً عن موقعه الحقيقي.
+        mapLibreMapOrNull?.animateCamera(CameraUpdateFactory.newLatLngZoom(user, 15.0))
+        binding.navInfoBar.visibility = View.VISIBLE
         RoutingEngine.computeRoute(user, destination, mode) { outcome ->
             binding.status.visibility = View.GONE
             drawRouteOutcome(outcome)
@@ -674,10 +697,12 @@ class MainActivity : AppCompatActivity() {
     /** ينهي الرحلة النشطة: يمسح المسار المرسوم وعلامة الوجهة، ويعيد البوصلة واللوحة لوضعهما الافتراضي. */
     private fun endTrip() {
         activeDestination = null
+        activeDestinationName = null
         splitViewVisible = false
         binding.compassPanel.visibility = View.GONE
         binding.fabCloseCompassPanel.visibility = View.GONE
         binding.fabEndTrip.visibility = View.GONE
+        binding.navInfoBar.visibility = View.GONE
         val style = loadedStyle
         style?.getSourceAs<GeoJsonSource>("route-solid-source")?.setGeoJson(FeatureCollection.fromFeatures(emptyArray()))
         style?.getSourceAs<GeoJsonSource>("route-straight-source")?.setGeoJson(FeatureCollection.fromFeatures(emptyArray()))
@@ -854,17 +879,35 @@ class MainActivity : AppCompatActivity() {
         binding.compassArrow.headingDegrees = displayHeading.toFloat()
         binding.compassArrow.pointsToDestination = hasTarget
 
-        if (splitViewVisible && hasTarget) {
+        if (hasTarget) {
             val userLatLng = LatLng(loc!!.latitude, loc.longitude)
-            val distance = GeoMath.distanceMeters(userLatLng, destination!!)
-            binding.compassPanel.bearingDegrees = displayHeading.toFloat()
-            binding.compassPanel.bearingLabelText =
-                "الاتجاه: ${Math.round(targetBearing)} درجة ${GeoMath.compassLabelArabic(targetBearing)}"
-            binding.compassPanel.distanceText = "المسافة المتبقية: ${GeoMath.formatDistance(distance)}"
-            binding.compassPanel.elevationText = if (loc.hasAltitude()) {
-                "الارتفاع: ${Math.round(loc.altitude)} م"
-            } else {
-                "الارتفاع: غير متاح من الجهاز حالياً"
+            val distanceRemaining = GeoMath.distanceMeters(userLatLng, destination!!)
+            val speedKmh = if (loc.hasSpeed() && loc.speed > 0.2f) loc.speed * 3.6 else null
+
+            if (splitViewVisible) {
+                binding.compassPanel.bearingDegrees = displayHeading.toFloat()
+                binding.compassPanel.bearingLabelText =
+                    "الاتجاه: ${Math.round(targetBearing)} درجة ${GeoMath.compassLabelArabic(targetBearing)}"
+                binding.compassPanel.distanceText = "المسافة المتبقية: ${GeoMath.formatDistance(distanceRemaining)}"
+                binding.compassPanel.elevationText = if (loc.hasAltitude()) {
+                    "الارتفاع: ${Math.round(loc.altitude)} م"
+                } else {
+                    "الارتفاع: غير متاح من الجهاز حالياً"
+                }
+            }
+
+            // شريط الملاحة السفلي النيون الجديد: يبقى ظاهراً ومحدَّثاً طوال الرحلة بصرف النظر عن فتح
+            // لوحة البوصلة النصفية من عدمه — هذا ما طلبه المستخدم تحديداً (شريط سفلي دائم أثناء الملاحة).
+            if (binding.navInfoBar.visibility == View.VISIBLE) {
+                val title = activeDestinationName ?: getString(R.string.go_to)
+                val speedLine = if (speedKmh != null) {
+                    val etaMinutes = if (speedKmh > 1.0) Math.round((distanceRemaining / 1000.0) / speedKmh * 60.0) else null
+                    "السرعة: ${Math.round(speedKmh)} كم/س" +
+                        (etaMinutes?.let { "  •  الوقت المتبقي: ~$it د" } ?: "")
+                } else {
+                    "السرعة: —"
+                }
+                binding.navInfoBar.text = "$title\n${getString(R.string.distance_to_point, GeoMath.formatDistance(distanceRemaining))}\n$speedLine"
             }
         }
     }
