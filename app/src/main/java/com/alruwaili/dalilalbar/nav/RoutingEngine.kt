@@ -3,6 +3,10 @@ package com.alruwaili.dalilalbar.nav
 import android.os.Handler
 import android.os.Looper
 import org.maplibre.android.geometry.LatLng
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 enum class NavMode { STRAIGHT, CAR }
 
@@ -50,7 +54,35 @@ object RoutingEngine {
     // يُقبل تسديد غير منطقي لطريق بعيد جداً فعلياً عن أي من النقطتين (وليس قيداً تعسفياً صغيراً كسابقه).
     private const val LONG_ROUTE_MAX_SNAP_METERS = 150000.0
 
+    // سقف زمني إجمالي صارم لكامل عملية حساب مسار السيارة (كل استعلامات Overpass + بناء الرسم البياني
+    // + Dijkstra مجتمعة)، لحل مشكلة الانتظار غير المحدود التي رصدها المستخدم فعلياً (17كم استغرق أكثر
+    // من 3 دقائق، وقد يطول الانتظار عدة دقائق لمسارات 1000-2000كم). عند تجاوزه نتراجع فوراً لخط مستقيم.
+    private const val OVERALL_DEADLINE_MS = 40_000L
+
+    // حدّ مسافة قبل محاولة أي حساب مباشر عبر الطرق الحقيقية: المسافات الأكبر من هذا (مثل 1000-2000كم)
+    // تُعرض كخط مستقيم فوراً دون أي استعلام شبكي، بدل انتظار قد يصل لعدة دقائق لنتيجة غير مضمونة أصلاً.
+    private const val LONG_DISTANCE_LIVE_ROUTING_CUTOFF_METERS = 200_000.0
+
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    /**
+     * يُشغّل [block] (عملية قد تطول: بناء رسم بياني + Dijkstra) على خيط منفصل بحد زمني أقصى يساوي الوقت
+     * المتبقي فعلياً من [deadlineAtMs]. إن انتهى الوقت أو تجاوزناه مسبقاً، يُعاد null فوراً دون انتظار
+     * اكتمال العملية (نتخلّى عن نتيجتها، دون أن يعني هذا بالضرورة إيقاف الخيط الداخلي فوراً).
+     */
+    private fun <T> runWithDeadline(deadlineAtMs: Long, block: () -> T?): T? {
+        val remaining = deadlineAtMs - System.currentTimeMillis()
+        if (remaining <= 0L) return null
+        val executor = Executors.newSingleThreadExecutor()
+        return try {
+            val future = executor.submit(Callable { block() })
+            future.get(remaining, TimeUnit.MILLISECONDS)
+        } catch (e: TimeoutException) {
+            null
+        } finally {
+            executor.shutdownNow()
+        }
+    }
 
     fun computeRoute(user: LatLng, destination: LatLng, mode: NavMode, callback: (RouteOutcome) -> Unit) {
         val straightDistance = GeoMath.distanceMeters(user, destination)
@@ -67,9 +99,23 @@ object RoutingEngine {
             return
         }
 
+        if (straightDistance > LONG_DISTANCE_LIVE_ROUTING_CUTOFF_METERS) {
+            // مسافة طويلة جداً (مثل 1000-2000كم): نعرض خطاً مستقيماً فوراً دون أي استعلام شبكي، بدل
+            // انتظار قد يطول عدة دقائق لنتيجة غير مضمونة أصلاً، كما طلب المستخدم تحديداً.
+            callback(
+                straightFallback(
+                    user, destination, straightDistance,
+                    "المسافة (${GeoMath.formatDistance(straightDistance)}) تتجاوز حد البحث المباشر عبر الطرق الحقيقية " +
+                        "(${GeoMath.formatDistance(LONG_DISTANCE_LIVE_ROUTING_CUTOFF_METERS)})، فعُرض خط مستقيم فوراً بدل انتظار قد يطول دقائق"
+                )
+            )
+            return
+        }
+
         Thread {
+            val deadlineAtMs = System.currentTimeMillis() + OVERALL_DEADLINE_MS
             val outcome = try {
-                computeCarRoute(user, destination, straightDistance)
+                computeCarRoute(user, destination, straightDistance, deadlineAtMs)
             } catch (e: Exception) {
                 straightFallback(user, destination, straightDistance, "خطأ غير متوقع: ${e.message ?: e.javaClass.simpleName}")
             }
@@ -85,7 +131,7 @@ object RoutingEngine {
             fallbackReason = reason
         )
 
-    private fun computeCarRoute(user: LatLng, destination: LatLng, straightDistance: Double): RouteOutcome {
+    private fun computeCarRoute(user: LatLng, destination: LatLng, straightDistance: Double, deadlineAtMs: Long): RouteOutcome {
         var south = minOf(user.latitude, destination.latitude)
         var north = maxOf(user.latitude, destination.latitude)
         var west = minOf(user.longitude, destination.longitude)
@@ -98,7 +144,7 @@ object RoutingEngine {
             // المسافة كبيرة جداً لاستعلام مربع كامل واحد. بدلاً من الاستسلام لخط مستقيم كامل فوراً،
             // نتتبّع الطريق الحقيقي الفعلي مهما طالت المسافة عبر استعلام "ممر" ضيّق بمحاذاة خط السير،
             // ولا نرسم خطاً مستقيماً إلا للفجوة الأخيرة غير المتصلة بطريق قرب الوجهة (أو قرب الانطلاق).
-            return computeLongDistanceCarRoute(user, destination, straightDistance)
+            return computeLongDistanceCarRoute(user, destination, straightDistance, deadlineAtMs)
         }
 
         val network = try {
@@ -114,18 +160,42 @@ object RoutingEngine {
             )
         }
 
-        // المحاولة الأولى: الطرق المعبّدة فقط.
-        val pavedGraph = RoadGraph.build(network, includeTrack = false)
-        val pavedResult = tryRoute(pavedGraph, user, destination)
+        if (System.currentTimeMillis() >= deadlineAtMs) {
+            return straightFallback(
+                user, destination, straightDistance,
+                "تجاوز الوقت المسموح لحساب المسار عبر الطرق الحقيقية (${OVERALL_DEADLINE_MS / 1000} ثانية)"
+            )
+        }
+
+        // المحاولة الأولى: الطرق المعبّدة فقط. نُشغّل بناء الرسم البياني وDijkstra معاً بحد زمني صارم
+        // لا يتجاوز الوقت المتبقي من المهلة الإجمالية، كي لا يتعلّق الحساب بلا حدود على رسم بياني ضخم.
+        val pavedResult = runWithDeadline(deadlineAtMs) {
+            tryRoute(RoadGraph.build(network, includeTrack = false), user, destination)
+        }
         if (pavedResult != null) {
             return assemble(user, destination, pavedResult, straightDistance, reason = null)
         }
 
+        if (System.currentTimeMillis() >= deadlineAtMs) {
+            return straightFallback(
+                user, destination, straightDistance,
+                "تجاوز الوقت المسموح لحساب المسار عبر الطرق الحقيقية (${OVERALL_DEADLINE_MS / 1000} ثانية)"
+            )
+        }
+
         // المحاولة الثانية: إضافة الدروب/الردمية عند عدم اتصال المسار المعبّد.
-        val mixedGraph = RoadGraph.build(network, includeTrack = true)
-        val mixedResult = tryRoute(mixedGraph, user, destination)
+        val mixedResult = runWithDeadline(deadlineAtMs) {
+            tryRoute(RoadGraph.build(network, includeTrack = true), user, destination)
+        }
         if (mixedResult != null) {
             return assemble(user, destination, mixedResult, straightDistance, reason = null)
+        }
+
+        if (System.currentTimeMillis() >= deadlineAtMs) {
+            return straightFallback(
+                user, destination, straightDistance,
+                "تجاوز الوقت المسموح لحساب المسار عبر الطرق الحقيقية (${OVERALL_DEADLINE_MS / 1000} ثانية)"
+            )
         }
 
         // المحاولة الثالثة (أخيرة): لا يتصل الطريق/الدرب بين النقطتين في بيانات OSM — خط مستقيم.
@@ -143,9 +213,10 @@ object RoutingEngine {
      * أي طريق حقيقي قريب قد يقع جانبياً خارج الممر المستقيم تماماً. لا يُرسم خط مستقيم إلا للفجوة
      * الأخيرة غير المتصلة بأي طريق حقيقي (قرب الانطلاق و/أو قرب الوجهة) — وليس للمسافة الطويلة كلها.
      */
-    private fun computeLongDistanceCarRoute(user: LatLng, destination: LatLng, straightDistance: Double): RouteOutcome {
+    private fun computeLongDistanceCarRoute(user: LatLng, destination: LatLng, straightDistance: Double, deadlineAtMs: Long): RouteOutcome {
         val tooFarReason = "المسافة بين نقطة الانطلاق والوجهة (${GeoMath.formatDistance(straightDistance)}) كبيرة جداً " +
             "لاستعلام مربع كامل واحد؛ استُخدم بحث بالممر مع الطريق الحقيقي بدلاً من ذلك"
+        val timeoutSeconds = OVERALL_DEADLINE_MS / 1000
 
         val bearing = GeoMath.bearingDegrees(user, destination)
         val leftBearing = (bearing - 90.0 + 360.0) % 360.0
@@ -167,6 +238,13 @@ object RoutingEngine {
             )
         }
 
+        if (System.currentTimeMillis() >= deadlineAtMs) {
+            return straightFallback(
+                user, destination, straightDistance,
+                "$tooFarReason، وتجاوز الوقت المسموح ($timeoutSeconds ثانية) قبل إكمال البحث عن الطريق الحقيقي"
+            )
+        }
+
         fun localNetwork(center: LatLng): RoadNetwork? = try {
             OverpassClient.fetchRoadNetwork(
                 center.latitude - ENDPOINT_LOCAL_HALF_DEGREES,
@@ -178,8 +256,14 @@ object RoutingEngine {
             null // تعذّر الاستعلام المحلي الإضافي ليس سبباً كافياً لإفشال كل المحاولة؛ نكتفي بالممر
         }
 
-        localNetwork(user)?.let { networks.add(it) }
-        localNetwork(destination)?.let { networks.add(it) }
+        // نتخطّى الاستعلامين المحليين الإضافيين إن كانت المهلة قد أوشكت على الانتهاء أصلاً، بدل إهدار
+        // الوقت المتبقي على استعلامات شبكية جديدة لن يبقى وقت لاستثمار نتيجتها بأي حال.
+        if (System.currentTimeMillis() < deadlineAtMs) {
+            localNetwork(user)?.let { networks.add(it) }
+        }
+        if (System.currentTimeMillis() < deadlineAtMs) {
+            localNetwork(destination)?.let { networks.add(it) }
+        }
 
         val network = OverpassClient.merge(networks)
         if (network.ways.isEmpty()) {
@@ -189,8 +273,16 @@ object RoutingEngine {
             )
         }
 
-        val pavedGraph = RoadGraph.build(network, includeTrack = false)
-        val pavedResult = tryRoute(pavedGraph, user, destination, LONG_ROUTE_MAX_SNAP_METERS)
+        if (System.currentTimeMillis() >= deadlineAtMs) {
+            return straightFallback(
+                user, destination, straightDistance,
+                "$tooFarReason، وتجاوز الوقت المسموح ($timeoutSeconds ثانية)"
+            )
+        }
+
+        val pavedResult = runWithDeadline(deadlineAtMs) {
+            tryRoute(RoadGraph.build(network, includeTrack = false), user, destination, LONG_ROUTE_MAX_SNAP_METERS)
+        }
         if (pavedResult != null) {
             return assemble(
                 user, destination, pavedResult, straightDistance,
@@ -198,12 +290,27 @@ object RoutingEngine {
             )
         }
 
-        val mixedGraph = RoadGraph.build(network, includeTrack = true)
-        val mixedResult = tryRoute(mixedGraph, user, destination, LONG_ROUTE_MAX_SNAP_METERS)
+        if (System.currentTimeMillis() >= deadlineAtMs) {
+            return straightFallback(
+                user, destination, straightDistance,
+                "$tooFarReason، وتجاوز الوقت المسموح ($timeoutSeconds ثانية) أثناء البحث عن مسار معبّد"
+            )
+        }
+
+        val mixedResult = runWithDeadline(deadlineAtMs) {
+            tryRoute(RoadGraph.build(network, includeTrack = true), user, destination, LONG_ROUTE_MAX_SNAP_METERS)
+        }
         if (mixedResult != null) {
             return assemble(
                 user, destination, mixedResult, straightDistance,
                 reason = "$tooFarReason؛ عُثر على طريق/درب حقيقي متصل عبر بحث بالممر"
+            )
+        }
+
+        if (System.currentTimeMillis() >= deadlineAtMs) {
+            return straightFallback(
+                user, destination, straightDistance,
+                "$tooFarReason، وتجاوز الوقت المسموح ($timeoutSeconds ثانية) أثناء البحث عن مسار/درب"
             )
         }
 

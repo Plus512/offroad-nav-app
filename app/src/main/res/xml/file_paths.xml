@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- مسارات الملفات المسموح مشاركتها عبر FileProvider. "Documents/tracks/" يطابق تماماً المسار الفعلي
+     الذي يكتب فيه TrackRecorder.saveAs ملفات GPX فعلاً (getExternalFilesDir(DIRECTORY_DOCUMENTS)/tracks)،
+     تم التحقق منه بقراءة الكود الفعلي لا تخميناً. -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <external-files-path name="tracks" path="Documents/tracks/" />
+</paths>

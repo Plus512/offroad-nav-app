@@ -27,6 +27,25 @@
             android:name=".SettingsActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
+
+        <!-- شاشة "المحفوظات" (مواقعي/مساراتي) المستقلة الجديدة، مطابِقة لتصميم التطبيق المرجعي
+             «خرائط الصحراء - الدليلة» كما طلب المستخدم صراحةً بصوره الفعلية. -->
+        <activity
+            android:name=".SavedItemsActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <!-- موفِّر ملفات (FileProvider) لازم لمشاركة ملف GPX لمسار محفوظ عبر "مشاركة" في القائمة
+             المنبثقة لكل مسار، لأن مشاركة Uri من نوع file:// مباشرة ممنوعة في إصدارات أندرويد الحديثة. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>

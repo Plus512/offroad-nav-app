@@ -159,6 +159,32 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+    // شاشة "المحفوظات" المستقلة الجديدة (SavedItemsActivity) قد تُعيد "اذهب إلى" نقطة معيّنة عبر
+    // setResult، أو لا تُعيد شيئاً (RESULT_CANCELED) إذا أغلقها المستخدم بزر الرجوع فقط.
+    private val savedItemsLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val data = result.data
+            if (result.resultCode == RESULT_OK && data != null && data.hasExtra("go_to_lat")) {
+                val lat = data.getDoubleExtra("go_to_lat", 0.0)
+                val lon = data.getDoubleExtra("go_to_lon", 0.0)
+                val zoom = data.getDoubleExtra("go_to_zoom", 14.0)
+                mapLibreMapOrNull?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(lat, lon), zoom))
+            }
+        }
+
+    /** يفتح شاشة "المحفوظات" المستقلة الجديدة، مع موقع المستخدم الحالي (لحساب المسافة لكل عنصر)
+     * والتبويب المطلوب فتحه مبدئياً (مواقع أو مسارات). */
+    private fun openSavedItems(showPlaces: Boolean) {
+        val intent = Intent(this, SavedItemsActivity::class.java).apply {
+            putExtra(SavedItemsActivity.EXTRA_SHOW_PLACES, showPlaces)
+            lastLocation?.let {
+                putExtra(SavedItemsActivity.EXTRA_USER_LAT, it.latitude)
+                putExtra(SavedItemsActivity.EXTRA_USER_LON, it.longitude)
+            }
+        }
+        savedItemsLauncher.launch(intent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         MapLibre.getInstance(this)
 
@@ -227,7 +253,7 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
         binding.fabSearch.setOnClickListener { showSearchDialog() }
-        binding.fabSavedItems.setOnClickListener { showSavedItemsDialog() }
+        binding.fabSavedItems.setOnClickListener { openSavedItems(showPlaces = true) }
         binding.fabMeasure.setOnClickListener { toggleMeasureTool() }
         binding.compassArrow.setOnClickListener { toggleSplitView() }
         binding.fabCloseCompassPanel.setOnClickListener { toggleSplitView() }
@@ -353,25 +379,47 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * نسيج تهشير مائل (diagonal hatching) أزرق على خلفية شفافة، يُستخدم لتمييز مناطق "قاع/خبرة"
+     * نسيج خطوط زرقاء معرّجة مقطّعة (zigzag/dashed) على خلفية شفافة، يُستخدم لتمييز مناطق "قاع/خبرة/غدير"
      * (منخفضات تجمُّع مياه موسمية — مستنقعات مائية موسمية وليست مياهاً دائمة) بصرياً عن باقي تضاريس
-     * الصحراء، بنفس الأسلوب الكارتوغرافي الذي لاحظه المستخدم في التطبيق المرجعي desert.maps.navigator.web.
-     * نرسمه برمجياً بدل تضمين صورة خارجية، لأن الـsprite الحالي بعيد (tiles.openfreemap.org) ولا يمكن
-     * إضافة صورة محلية إليه إلا عبر Style.addImage في الكود.
+     * الصحراء. تم تعديله بناءً على طلب المستخدم الصريح: "خطوط مهشّرة معرّجة مقطّعة" بدلاً من الخطوط
+     * المستقيمة المائلة المستخدمة سابقاً. نرسمه برمجياً بدل تضمين صورة خارجية، لأن الـsprite الحالي
+     * بعيد (tiles.openfreemap.org) ولا يمكن إضافة صورة محلية إليه إلا عبر Style.addImage في الكود.
      */
     private fun buildQaKhabraPatternBitmap(): Bitmap {
-        val size = 16
+        val size = 24
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = AndroidColor.parseColor("#1565C0")
-            strokeWidth = 1.2f
+            strokeWidth = 1.4f
             style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            // يحوّل أي مسار (خط متعرّج هنا) إلى خط متقطّع (مقطّع): جزء مرسوم 3px ثم فراغ 2.2px وهكذا.
+            pathEffect = android.graphics.DashPathEffect(floatArrayOf(3f, 2.2f), 0f)
         }
-        // خطان متوازيان مائلان (45°) يتكرران تلقائياً كنسيج عند استخدامهما كـfill-pattern.
-        canvas.drawLine(-2f, size + 2f, size + 2f, -2f, paint)
-        canvas.drawLine(-2f + size, size + 2f, size + 2f + size, -2f, paint)
-        canvas.drawLine(-2f - size, size + 2f, size + 2f - size, -2f, paint)
+
+        val amplitude = 2.6f
+        val period = size / 3f // 3 موجات كاملة عبر عرض البلاطة، كي تتكرر أفقياً دون فاصل مرئي عند حواف البلاط.
+
+        fun zigzagPath(baseY: Float): Path {
+            val path = Path()
+            var x = -size.toFloat()
+            var up = true
+            path.moveTo(x, baseY)
+            while (x < size * 2f) {
+                val nextX = x + period / 2f
+                val y = if (up) baseY - amplitude else baseY + amplitude
+                path.lineTo(nextX, y)
+                x = nextX
+                up = !up
+            }
+            return path
+        }
+
+        // صفّان من الخطوط المعرّجة المقطّعة موزّعان رأسياً لتغطية البلاطة كاملةً كنسيج مستنقع ماء.
+        canvas.drawPath(zigzagPath(size * 0.3f), paint)
+        canvas.drawPath(zigzagPath(size * 0.75f), paint)
+
         return bitmap
     }
 
@@ -388,40 +436,93 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ===================== البحث عن موقع بالاسم =====================
+    // أُعيد تصميم هذه الواجهة بالكامل بناءً على طلب المستخدم الصريح: بدل نافذة منبثقة في وسط الشاشة
+    // (AlertDialog) تطلب كتابة الاسم كاملاً ثم الضغط لعرض النتائج، أصبح شريط بحث ملاصق لأعلى الشاشة
+    // (searchBarContainer) مع قائمة منسدلة حيّة (lvSearchResults) تتحدّث تلقائياً مع كل حرف يُكتب —
+    // تماماً كما وصف: "تكتب ال، تطلع لك جميع الأسماء بحرف ال. تكتب الكلمة تظهر لك الأسماء منسدلة تحت".
 
-    private fun showSearchDialog() {
-        val input = android.widget.EditText(this).apply { hint = getString(R.string.search_hint) }
-        val dialog = AlertDialog.Builder(this, R.style.Theme_DalilAlBar_NeonDialog)
-            .setTitle(R.string.search_title)
-            .setView(input)
-            .setNegativeButton(android.R.string.cancel, null)
-            .create()
-        input.setOnEditorActionListener { _, _, _ ->
-            runSearch(input.text?.toString().orEmpty(), dialog)
-            true
+    private var currentSearchResults: List<LocationsRepository.LocationRow> = emptyList()
+    private var pendingSearchRunnable: Runnable? = null
+    private val searchDebounceHandler = Handler(Looper.getMainLooper())
+    private val searchResultsAdapter by lazy {
+        android.widget.ArrayAdapter(
+            this, android.R.layout.simple_list_item_1, android.R.id.text1, mutableListOf<String>()
+        ).also { adapter ->
+            // نطبّق ألوان الثيم النيون يدوياً على صفوف القائمة لأن simple_list_item_1 الجاهزة سوداء/بيضاء افتراضياً.
+            binding.lvSearchResults.adapter = adapter
         }
-        dialog.show()
     }
 
-    private fun runSearch(query: String, parentDialog: AlertDialog) {
-        if (query.isBlank()) return
+    private var searchUiInitialized = false
+
+    private fun setupSearchUi() {
+        if (searchUiInitialized) return // نمنع تسجيل مستمعي الكتابة (TextWatcher) أكثر من مرة عند فتح البحث عدة مرات.
+        searchUiInitialized = true
+        searchResultsAdapter // يضمن تهيئة المحوّل وربطه بالقائمة (lazy) مرة واحدة فقط قبل أي استخدام.
+
+        binding.etSearch.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                scheduleLiveSearch(s?.toString().orEmpty())
+            }
+        })
+        binding.etSearch.setOnEditorActionListener { _, _, _ ->
+            scheduleLiveSearch(binding.etSearch.text?.toString().orEmpty(), immediate = true)
+            true
+        }
+        binding.btnCloseSearch.setOnClickListener { hideSearchUi() }
+        binding.lvSearchResults.setOnItemClickListener { _, _, position, _ ->
+            val r = currentSearchResults.getOrNull(position) ?: return@setOnItemClickListener
+            val target = LatLng(r.latitude, r.longitude)
+            mapLibreMapOrNull?.animateCamera(CameraUpdateFactory.newLatLngZoom(target, 14.0))
+            hideSearchUi()
+        }
+    }
+
+    private fun showSearchDialog() {
+        setupSearchUi()
+        binding.searchBarContainer.visibility = View.VISIBLE
+        binding.etSearch.requestFocus()
+        val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+        imm.showSoftInput(binding.etSearch, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    private fun hideSearchUi() {
+        pendingSearchRunnable?.let { searchDebounceHandler.removeCallbacks(it) }
+        binding.lvSearchResults.visibility = View.GONE
+        binding.searchBarContainer.visibility = View.GONE
+        binding.etSearch.text?.clear()
+        currentSearchResults = emptyList()
+        val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+        imm.hideSoftInputFromWindow(binding.etSearch.windowToken, 0)
+    }
+
+    /**
+     * بحث حيّ مع كل حرف: نؤجّل التنفيذ الفعلي ١٨٠ ملّي ثانية بعد آخر حرف (debounce) كي لا نستعلم قاعدة
+     * البيانات (٣١٤ ألف صف) على كل ضغطة زر منفردة أثناء الكتابة السريعة، بل فقط بعد توقّف قصير طبيعي.
+     */
+    private fun scheduleLiveSearch(query: String, immediate: Boolean = false) {
+        pendingSearchRunnable?.let { searchDebounceHandler.removeCallbacks(it) }
+        if (query.isBlank()) {
+            currentSearchResults = emptyList()
+            searchResultsAdapter.clear()
+            binding.lvSearchResults.visibility = View.GONE
+            return
+        }
+        val runnable = Runnable { runSearch(query) }
+        pendingSearchRunnable = runnable
+        searchDebounceHandler.postDelayed(runnable, if (immediate) 0L else 180L)
+    }
+
+    private fun runSearch(query: String) {
         Thread {
             val results = locationsRepository.searchByName(query, 30)
             runOnUiThread {
-                if (results.isEmpty()) {
-                    Toast.makeText(this, R.string.search_no_results, Toast.LENGTH_SHORT).show()
-                } else {
-                    parentDialog.dismiss()
-                    AlertDialog.Builder(this, R.style.Theme_DalilAlBar_NeonDialog)
-                        .setTitle(R.string.search_title)
-                        .setItems(results.map { it.title }.toTypedArray()) { _, which ->
-                            val r = results[which]
-                            val target = LatLng(r.latitude, r.longitude)
-                            mapLibreMapOrNull?.animateCamera(CameraUpdateFactory.newLatLngZoom(target, 14.0))
-                        }
-                        .setNegativeButton(android.R.string.cancel, null)
-                        .show()
-                }
+                currentSearchResults = results
+                searchResultsAdapter.clear()
+                searchResultsAdapter.addAll(results.map { it.title })
+                binding.lvSearchResults.visibility = if (results.isEmpty()) View.GONE else View.VISIBLE
             }
         }.start()
     }
@@ -497,134 +598,6 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
-    }
-
-    private fun showSavedItemsDialog() {
-        val places = savedPlacesStore.list()
-        val tracks = savedTracksStore.list()
-        val view = android.widget.ScrollView(this)
-        val container = android.widget.LinearLayout(this).apply {
-            orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(dp(8), dp(8), dp(8), dp(8))
-        }
-        view.addView(container)
-
-        fun sectionHeader(text: String) {
-            container.addView(android.widget.TextView(this).apply {
-                this.text = text
-                setTextColor(resources.getColor(R.color.neon_green, theme))
-                typeface = android.graphics.Typeface.create(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
-                textSize = 14f
-                setPadding(0, dp(12), 0, dp(4))
-            })
-        }
-
-        val dialogRef = arrayOfNulls<AlertDialog>(1)
-
-        sectionHeader(getString(R.string.saved_places_section))
-        if (places.isEmpty()) {
-            container.addView(android.widget.TextView(this).apply {
-                text = getString(R.string.saved_items_empty)
-                setTextColor(resources.getColor(R.color.neon_green_dim, theme))
-            })
-        }
-        places.forEach { place ->
-            val row = android.widget.LinearLayout(this).apply {
-                orientation = android.widget.LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.CENTER_VERTICAL
-            }
-            val label = android.widget.TextView(this).apply {
-                text = place.name
-                setTextColor(resources.getColor(R.color.neon_green, theme))
-                layoutParams = android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            val toggle = android.widget.Switch(this).apply {
-                isChecked = place.visible
-                setOnCheckedChangeListener { _, checked ->
-                    savedPlacesStore.setVisible(place.id, checked)
-                    refreshSavedPlacesLayer()
-                }
-            }
-            val goBtn = android.widget.Button(this, null, 0, R.style.Widget_DalilAlBar_NeonDialogButton).apply {
-                text = getString(R.string.go_to)
-                setBackgroundResource(R.drawable.bg_neon_tab_active)
-                setOnClickListener {
-                    mapLibreMapOrNull?.animateCamera(CameraUpdateFactory.newLatLngZoom(place.latLng, 14.0))
-                    dialogRef[0]?.dismiss()
-                }
-            }
-            val delBtn = android.widget.Button(this, null, 0, R.style.Widget_DalilAlBar_NeonDialogButton).apply {
-                text = getString(R.string.delete)
-                setBackgroundResource(R.drawable.bg_neon_tab_active)
-                setOnClickListener {
-                    savedPlacesStore.delete(place.id)
-                    refreshSavedPlacesLayer()
-                    Toast.makeText(this@MainActivity, R.string.saved_place_deleted, Toast.LENGTH_SHORT).show()
-                    dialogRef[0]?.dismiss()
-                    showSavedItemsDialog()
-                }
-            }
-            row.addView(label); row.addView(toggle); row.addView(goBtn); row.addView(delBtn)
-            container.addView(row)
-        }
-
-        sectionHeader(getString(R.string.saved_tracks_section))
-        if (tracks.isEmpty()) {
-            container.addView(android.widget.TextView(this).apply {
-                text = getString(R.string.saved_items_empty)
-                setTextColor(resources.getColor(R.color.neon_green_dim, theme))
-            })
-        }
-        tracks.forEach { track ->
-            val row = android.widget.LinearLayout(this).apply {
-                orientation = android.widget.LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.CENTER_VERTICAL
-            }
-            val label = android.widget.TextView(this).apply {
-                text = track.name
-                setTextColor(resources.getColor(R.color.neon_green, theme))
-                layoutParams = android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            val toggle = android.widget.Switch(this).apply {
-                isChecked = track.visible
-                setOnCheckedChangeListener { _, checked ->
-                    savedTracksStore.setVisible(track.file.name, checked)
-                    refreshSavedTracksLayer()
-                }
-            }
-            val goBtn = android.widget.Button(this, null, 0, R.style.Widget_DalilAlBar_NeonDialogButton).apply {
-                text = getString(R.string.go_to)
-                setBackgroundResource(R.drawable.bg_neon_tab_active)
-                setOnClickListener {
-                    val points = savedTracksStore.readPoints(track.file)
-                    if (points.isNotEmpty()) {
-                        mapLibreMapOrNull?.animateCamera(CameraUpdateFactory.newLatLngZoom(points.first(), 13.0))
-                    }
-                    dialogRef[0]?.dismiss()
-                }
-            }
-            val delBtn = android.widget.Button(this, null, 0, R.style.Widget_DalilAlBar_NeonDialogButton).apply {
-                text = getString(R.string.delete)
-                setBackgroundResource(R.drawable.bg_neon_tab_active)
-                setOnClickListener {
-                    savedTracksStore.delete(track.file)
-                    refreshSavedTracksLayer()
-                    Toast.makeText(this@MainActivity, R.string.saved_track_deleted, Toast.LENGTH_SHORT).show()
-                    dialogRef[0]?.dismiss()
-                    showSavedItemsDialog()
-                }
-            }
-            row.addView(label); row.addView(toggle); row.addView(goBtn); row.addView(delBtn)
-            container.addView(row)
-        }
-
-        val dialog = AlertDialog.Builder(this, R.style.Theme_DalilAlBar_NeonDialog)
-            .setTitle(R.string.saved_items_title)
-            .setView(view)
-            .setNegativeButton(android.R.string.cancel, null)
-            .create()
-        dialogRef[0] = dialog
-        dialog.show()
     }
 
     /**
@@ -965,8 +938,11 @@ class MainActivity : AppCompatActivity() {
             .setView(input)
             .setPositiveButton(R.string.save) { _, _ ->
                 val name = input.text?.toString()?.trim().orEmpty()
-                val file = trackRecorder.saveAs(pending, name)
-                Toast.makeText(this, getString(R.string.recording_stopped_saved, file.name), Toast.LENGTH_LONG).show()
+                trackRecorder.saveAs(pending, name)
+                refreshSavedTracksLayer()
+                // طُلب صراحةً: "وعند الحفظ يذهب إلى قائمة المحفوظات" — فننتقل مباشرة إلى تبويب
+                // المسارات في شاشة المحفوظات الجديدة بدل إظهار Toast فقط.
+                openSavedItems(showPlaces = false)
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
@@ -1137,6 +1113,10 @@ class MainActivity : AppCompatActivity() {
         rotationSensor?.let {
             sensorManager.registerListener(orientationListener, it, SensorManager.SENSOR_DELAY_UI)
         }
+        // قد تكون شاشة "المحفوظات" (SavedItemsActivity) غيّرت حذفاً/إظهاراً/إخفاءً لمواقع أو مسارات
+        // محفوظة بينما كانت مفتوحة فوق هذه الشاشة؛ نعيد قراءتها من المخزن الفعلي عند العودة.
+        refreshSavedPlacesLayer()
+        refreshSavedTracksLayer()
     }
 
     override fun onPause() {

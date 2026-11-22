@@ -18,7 +18,8 @@ class SavedPlacesStore(context: Context) {
         val id: String,
         val name: String,
         val latLng: LatLng,
-        var visible: Boolean
+        var visible: Boolean,
+        var favorite: Boolean = false
     )
 
     private val prefs = context.getSharedPreferences("dalilalbar_saved_places", Context.MODE_PRIVATE)
@@ -35,7 +36,8 @@ class SavedPlacesStore(context: Context) {
                     id = o.getString("id"),
                     name = o.getString("name"),
                     latLng = LatLng(o.getDouble("lat"), o.getDouble("lon")),
-                    visible = o.optBoolean("visible", true)
+                    visible = o.optBoolean("visible", true),
+                    favorite = o.optBoolean("favorite", false)
                 )
             )
         }
@@ -63,6 +65,16 @@ class SavedPlacesStore(context: Context) {
         persist(list().filterNot { it.id == id })
     }
 
+    /** يبدّل حالة "المفضّلة" (أيقونة القلب) لموقع محفوظ، كما في شاشة المحفوظات المرجعية. */
+    fun toggleFavorite(id: String) {
+        val all = list().toMutableList()
+        val idx = all.indexOfFirst { it.id == id }
+        if (idx >= 0) {
+            all[idx] = all[idx].copy(favorite = !all[idx].favorite)
+            persist(all)
+        }
+    }
+
     private fun persist(all: List<SavedPlace>) {
         val arr = JSONArray()
         for (p in all) {
@@ -73,6 +85,7 @@ class SavedPlacesStore(context: Context) {
                     .put("lat", p.latLng.latitude)
                     .put("lon", p.latLng.longitude)
                     .put("visible", p.visible)
+                    .put("favorite", p.favorite)
             )
         }
         prefs.edit().putString(key, arr.toString()).apply()

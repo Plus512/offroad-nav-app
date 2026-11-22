@@ -52,4 +52,23 @@
     <string name="measure_distance">قياس المسافة</string>
     <string name="measure_distance_label">المسافة: %1$s</string>
     <string name="no_country_region_available">لا تتوفر لدينا بيانات خريطة محدَّدة لدولتك الحالية بعد</string>
+
+    <!-- شاشة "المحفوظات" الجديدة المستقلة (SavedItemsActivity) — أُعيد تصميمها بالكامل لتطابق تصميم
+         التطبيق المرجعي الآخر للمستخدم «خرائط الصحراء - الدليلة»، كما طلب صراحةً وأرسل صوره الفعلية. -->
+    <string name="tab_places_format">المواقع (%1$d)</string>
+    <string name="tab_tracks_format">المسارات المسجَّلة (%1$d)</string>
+    <string name="count_chip_places">%1$d موقع</string>
+    <string name="count_chip_tracks">%1$d مسار</string>
+    <string name="menu_go_to_map">الذهاب إلى الخريطة</string>
+    <string name="menu_go_to">الذهاب إلى</string>
+    <string name="menu_share">مشاركة</string>
+    <string name="menu_delete_location">حذف الموقع</string>
+    <string name="menu_show_on_map">إظهار على الخريطة</string>
+    <string name="menu_hide_from_map">إخفاء</string>
+    <string name="no_saved_tracks_title">لا توجد مسارات مسجَّلة بعد</string>
+    <string name="no_saved_tracks_desc">عند قيادتك في الصحراء والبر، اضغط على زر \"تسجيل الأثر\" على الخريطة ليتم رسم أثر حركتك وحفظه هنا للعودة عليه لاحقاً.</string>
+    <string name="no_saved_places_title">قائمة المواقع فارغة</string>
+    <string name="no_saved_places_desc">احفظ موقعاً من الخريطة (اضغط مطوَّلاً على نقطة) أو أضفه يدوياً بزر الإضافة أدناه.</string>
+    <string name="add_manual_location">إضافة موقع يدوياً</string>
+    <string name="share_place_text">%1$s\nhttps://maps.google.com/?q=%2$s,%3$s</string>
 </resources>
