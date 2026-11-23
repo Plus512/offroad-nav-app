@@ -25,6 +25,12 @@ class OfflineRegionsController(private val context: Context) {
         private const val STYLE_URL = "asset://style_dalil.json"
         private val JSON_CHARSET: Charset = Charset.forName("UTF-8")
         private const val JSON_FIELD_REGION_ID = "regionId"
+
+        // حجم خلية الاستعلام الواحدة بالدرجات: أصغر من MAX_BBOX_SIDE_DEGREES في RoutingEngine (١.٦)
+        // تحسُّباً، كي يبقى كل استعلام Overpass لمنطقة بحجم دولة كاملة ضمن حجم عملي معقول لخادم مجاني
+        // (لا نضمن نجاح كل خلية دائماً — خوادم Overpass العامة قد ترفض استعلاماً ثقيلاً بـ 429/504 حتى
+        // ضمن هذا الحجم، وهذا مُفصح عنه صراحة وليس وعداً بنجاح مضمون 100% لمناطق بمساحة دولة كاملة).
+        private const val CELL_SIZE_DEGREES = 1.2
     }
 
     interface ProgressListener {
@@ -104,12 +110,6 @@ class OfflineRegionsController(private val context: Context) {
         fun onComplete(def: OfflineRegionDef, failedCells: Int, totalCells: Int)
         fun onDownloadError(def: OfflineRegionDef, message: String)
     }
-
-    // حجم خلية الاستعلام الواحدة بالدرجات: أصغر من MAX_BBOX_SIDE_DEGREES في RoutingEngine (١.٦) تحسُّباً،
-    // كي يبقى كل استعلام Overpass لمنطقة بحجم دولة كاملة ضمن حجم عملي معقول لخادم مجاني (لا نضمن نجاح كل
-    // خلية دائماً — خوادم Overpass العامة قد ترفض استعلاماً ثقيلاً بـ 429/504 حتى ضمن هذا الحجم، وهذا
-    // مُفصح عنه صراحة وليس وعداً بنجاح مضمون 100% لمناطق بمساحة دولة كاملة).
-    private const val CELL_SIZE_DEGREES = 1.2
 
     /**
      * يحمّل شبكة الطرق/الدروب الحقيقية (Overpass API) لكامل [def] محلياً، مقسَّمة شبكياً إلى خلايا
