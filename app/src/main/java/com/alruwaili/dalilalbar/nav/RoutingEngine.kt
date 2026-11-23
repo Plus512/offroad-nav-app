@@ -1,5 +1,6 @@
 package com.alruwaili.dalilalbar.nav
 
+import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import org.maplibre.android.geometry.LatLng
@@ -64,6 +65,21 @@ object RoutingEngine {
     private const val LONG_DISTANCE_LIVE_ROUTING_CUTOFF_METERS = 200_000.0
 
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    // يُضبط مرة واحدة من MainActivity.onCreate (applicationContext) — يُستخدم فقط لفحص وجود شبكة
+    // طرق محمَّلة مسبقاً محلياً (زر "تحميل بيانات مسار السيارة" الجديد) قبل أي طلب Overpass مباشر. إن
+    // بقي null (لم يُضبط لأي سبب) يستمر السلوك تماماً كالسابق: طلب Overpass المباشر فقط، دون أي تغيير.
+    var appContext: Context? = null
+
+    /** يحاول استخدام شبكة محمَّلة محلياً أولاً (بلا إنترنت)، فإن لم توجد يطلب Overpass المباشر كالمعتاد. */
+    private fun fetchNetworkPreferCache(south: Double, west: Double, north: Double, east: Double): RoadNetwork {
+        val ctx = appContext
+        if (ctx != null) {
+            val cached = RoadNetworkCache.loadCovering(ctx, south, west, north, east)
+            if (cached != null && cached.ways.isNotEmpty()) return cached
+        }
+        return OverpassClient.fetchRoadNetwork(south, west, north, east)
+    }
 
     /**
      * يُشغّل [block] (عملية قد تطول: بناء رسم بياني + Dijkstra) على خيط منفصل بحد زمني أقصى يساوي الوقت
@@ -148,7 +164,7 @@ object RoutingEngine {
         }
 
         val network = try {
-            OverpassClient.fetchRoadNetwork(south, west, north, east)
+            fetchNetworkPreferCache(south, west, north, east)
         } catch (e: OverpassClient.OverpassException) {
             return straightFallback(user, destination, straightDistance, e.message ?: "تعذّر جلب بيانات الطرق الحقيقية")
         }
@@ -246,7 +262,7 @@ object RoutingEngine {
         }
 
         fun localNetwork(center: LatLng): RoadNetwork? = try {
-            OverpassClient.fetchRoadNetwork(
+            fetchNetworkPreferCache(
                 center.latitude - ENDPOINT_LOCAL_HALF_DEGREES,
                 center.longitude - ENDPOINT_LOCAL_HALF_DEGREES,
                 center.latitude + ENDPOINT_LOCAL_HALF_DEGREES,

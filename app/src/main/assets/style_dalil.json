@@ -893,6 +893,128 @@
           }
         ]
       }
+    },
+    "nafud_extent": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "name": "نفوذ الربع الخالي - الدهناء - النفود",
+              "note": "مُستخرج بالتثليث الجغرافي من لقطة شاشة المستخدم لتطبيق خرائط الصحراء (desert.maps.navigator.web)، باستخدام ثلاث نقاط مرجعية حقيقية (الرياض 24.7136, 46.6753 / صنعاء 15.3694, 44.1910 / طهران 35.6892, 51.3890) لتحويل إحداثيات البكسل إلى خط عرض/طول حقيقي. تقريب بصري أمين لشكل الطبقة كما ظهر في المرجع، وليس حدوداً جيولوجية رسمية."
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    44.4008,
+                    27.7106
+                  ],
+                  [
+                    45.8922,
+                    28.1642
+                  ],
+                  [
+                    45.312,
+                    27.2158
+                  ],
+                  [
+                    46.8769,
+                    27.3505
+                  ],
+                  [
+                    46.1516,
+                    26.155
+                  ],
+                  [
+                    48.4805,
+                    26.4399
+                  ],
+                  [
+                    49.6083,
+                    26.7439
+                  ],
+                  [
+                    54.7362,
+                    28.7348
+                  ],
+                  [
+                    59.574,
+                    30.2269
+                  ],
+                  [
+                    61.2675,
+                    29.8097
+                  ],
+                  [
+                    62.291,
+                    27.9782
+                  ],
+                  [
+                    60.5482,
+                    25.9986
+                  ],
+                  [
+                    56.0781,
+                    22.79
+                  ],
+                  [
+                    51.4976,
+                    20.0151
+                  ],
+                  [
+                    47.3504,
+                    18.8969
+                  ],
+                  [
+                    43.5648,
+                    18.8774
+                  ],
+                  [
+                    44.0695,
+                    21.1554
+                  ],
+                  [
+                    46.7214,
+                    23.6107
+                  ],
+                  [
+                    48.3007,
+                    25.4703
+                  ],
+                  [
+                    46.7174,
+                    25.4151
+                  ],
+                  [
+                    44.5887,
+                    25.1244
+                  ],
+                  [
+                    42.9686,
+                    25.2329
+                  ],
+                  [
+                    43.1484,
+                    26.2045
+                  ],
+                  [
+                    43.365,
+                    27.0069
+                  ],
+                  [
+                    44.4008,
+                    27.7106
+                  ]
+                ]
+              ]
+            }
+          }
+        ]
+      }
     }
   },
   "sprite": "https://tiles.openfreemap.org/sprites/ofm_f384/ofm",
@@ -945,9 +1067,9 @@
         false
       ],
       "paint": {
-        "fill-color": "#D9C49A",
+        "fill-color": "#B9A066",
         "fill-opacity": 1,
-        "fill-outline-color": "#D9C49A"
+        "fill-outline-color": "#8C7239"
       }
     },
     {
@@ -1538,10 +1660,10 @@
     {
       "id": "desert_extent_fill",
       "type": "fill",
-      "source": "arabian_extent",
+      "source": "nafud_extent",
       "paint": {
-        "fill-color": "#A3824F",
-        "fill-opacity": 0.4
+        "fill-color": "#CCA25A",
+        "fill-opacity": 0.55
       }
     },
     {
@@ -1588,6 +1710,14 @@
           [
             "in",
             "خبراء",
+            [
+              "get",
+              "name"
+            ]
+          ],
+          [
+            "in",
+            "خباري",
             [
               "get",
               "name"
@@ -1660,6 +1790,14 @@
               "get",
               "name"
             ]
+          ],
+          [
+            "in",
+            "خباري",
+            [
+              "get",
+              "name"
+            ]
           ]
         ],
         [
@@ -1676,7 +1814,7 @@
         ]
       ],
       "paint": {
-        "line-color": "#1565C0",
+        "line-color": "#0D7FEF",
         "line-width": [
           "interpolate",
           [
@@ -1689,6 +1827,10 @@
           0.5,
           14,
           1.5
+        ],
+        "line-dasharray": [
+          0,
+          2
         ]
       }
     },
@@ -1736,6 +1878,14 @@
           [
             "in",
             "خبراء",
+            [
+              "get",
+              "name"
+            ]
+          ],
+          [
+            "in",
+            "خباري",
             [
               "get",
               "name"
@@ -1808,6 +1958,14 @@
               "get",
               "name"
             ]
+          ],
+          [
+            "in",
+            "خباري",
+            [
+              "get",
+              "name"
+            ]
           ]
         ],
         [
@@ -1824,7 +1982,7 @@
         ]
       ],
       "paint": {
-        "line-color": "#1565C0",
+        "line-color": "#0D7FEF",
         "line-width": [
           "interpolate",
           [
@@ -1837,6 +1995,10 @@
           0.5,
           14,
           1.5
+        ],
+        "line-dasharray": [
+          0,
+          2
         ]
       }
     },
@@ -1884,6 +2046,14 @@
           [
             "in",
             "خبراء",
+            [
+              "get",
+              "name"
+            ]
+          ],
+          [
+            "in",
+            "خباري",
             [
               "get",
               "name"
@@ -1956,6 +2126,14 @@
               "get",
               "name"
             ]
+          ],
+          [
+            "in",
+            "خباري",
+            [
+              "get",
+              "name"
+            ]
           ]
         ],
         [
@@ -1972,7 +2150,7 @@
         ]
       ],
       "paint": {
-        "line-color": "#1565C0",
+        "line-color": "#0D7FEF",
         "line-width": [
           "interpolate",
           [
@@ -1985,6 +2163,10 @@
           0.5,
           14,
           1.5
+        ],
+        "line-dasharray": [
+          0,
+          2
         ]
       }
     },
@@ -2032,6 +2214,14 @@
           [
             "in",
             "خبراء",
+            [
+              "get",
+              "name"
+            ]
+          ],
+          [
+            "in",
+            "خباري",
             [
               "get",
               "name"
@@ -2104,6 +2294,14 @@
               "get",
               "name"
             ]
+          ],
+          [
+            "in",
+            "خباري",
+            [
+              "get",
+              "name"
+            ]
           ]
         ],
         [
@@ -2120,7 +2318,7 @@
         ]
       ],
       "paint": {
-        "line-color": "#1565C0",
+        "line-color": "#0D7FEF",
         "line-width": [
           "interpolate",
           [
@@ -2133,6 +2331,10 @@
           0.5,
           14,
           1.5
+        ],
+        "line-dasharray": [
+          0,
+          2
         ]
       }
     },
@@ -6046,6 +6248,14 @@
             "rank"
           ],
           20
+        ],
+        [
+          "!=",
+          [
+            "get",
+            "class"
+          ],
+          "peak"
         ]
       ],
       "layout": {
@@ -6140,6 +6350,14 @@
             "rank"
           ],
           20
+        ],
+        [
+          "!=",
+          [
+            "get",
+            "class"
+          ],
+          "peak"
         ]
       ],
       "layout": {
@@ -6234,6 +6452,14 @@
             "rank"
           ],
           7
+        ],
+        [
+          "!=",
+          [
+            "get",
+            "class"
+          ],
+          "peak"
         ]
       ],
       "layout": {
@@ -6291,6 +6517,90 @@
         "text-halo-blur": 0.5,
         "text-halo-color": "#ffffff",
         "text-halo-width": 1
+      }
+    },
+    {
+      "id": "label_peak",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "poi",
+      "minzoom": 6,
+      "filter": [
+        "all",
+        [
+          "match",
+          [
+            "geometry-type"
+          ],
+          [
+            "MultiPoint",
+            "Point"
+          ],
+          true,
+          false
+        ],
+        [
+          "==",
+          [
+            "get",
+            "class"
+          ],
+          "peak"
+        ]
+      ],
+      "layout": {
+        "icon-image": [
+          "get",
+          "class"
+        ],
+        "icon-size": 0.8,
+        "text-anchor": "top",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:ar"
+          ],
+          [
+            "get",
+            "name:nonlatin"
+          ],
+          [
+            "get",
+            "name_en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Bold"
+        ],
+        "text-max-width": 9,
+        "text-offset": [
+          0,
+          0.7
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          6,
+          10,
+          14,
+          14
+        ]
+      },
+      "paint": {
+        "text-color": "#008000",
+        "text-halo-blur": 0.3,
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.6
       }
     },
     {

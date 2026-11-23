@@ -199,6 +199,9 @@ class MainActivity : AppCompatActivity() {
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
         trackRecorder = TrackRecorder(applicationContext)
         locationsRepository = LocationsRepository(applicationContext)
+        // يتيح لمحرّك التوجيه استخدام شبكة الطرق المحمَّلة محلياً (زر "تحميل بيانات مسار السيارة")
+        // قبل أي طلب Overpass مباشر عبر الإنترنت — انظر RoadNetworkCache.
+        RoutingEngine.appContext = applicationContext
         savedPlacesStore = com.alruwaili.dalilalbar.nav.SavedPlacesStore(applicationContext)
         savedTracksStore = com.alruwaili.dalilalbar.nav.SavedTracksStore(applicationContext)
 
@@ -803,7 +806,18 @@ class MainActivity : AppCompatActivity() {
                     Expression.stop(LocationLabelStyle.MAX_TEXT_SIZE_ZOOM, Expression.literal(LocationLabelStyle.MAX_TEXT_SIZE))
                 )
             ),
-            PropertyFactory.textColor("#000000"),
+            // [تصنيف لوني لتسميات المواقع، طُلب 2026-11-23]: أزرق للمواقع المعلَّمة/المفضَّلة لدى
+            // المستخدم (is_fav=1 في locations.db) — أقرب مطابقة فعلية متاحة لمفهوم "محطات/علامات
+            // محددة"، وأسود لبقية المواقع. تنويه صريح: جدول locations.db الحقيقي (فُحص مباشرة، لا
+            // تخمين) لا يحوي أي عمود لحجم/تصنيف الموقع (قرية/مدينة كبيرة)، فلا يمكن تمييز "أحمر
+            // للمواقع الأكبر" فعلياً من هذه القاعدة وحدها دون عمود تصنيف إضافي يزوّدنا به المستخدم.
+            PropertyFactory.textColor(
+                Expression.match(
+                    Expression.get("is_fav"),
+                    Expression.literal("#000000"),
+                    Expression.stop(true, Expression.literal("#0166FF"))
+                )
+            ),
             PropertyFactory.textHaloColor("#FFFFFF"),
             PropertyFactory.textHaloWidth(1.3f),
             PropertyFactory.textAllowOverlap(false),
@@ -847,6 +861,7 @@ class MainActivity : AppCompatActivity() {
             val features = rows.map { row ->
                 val feature = Feature.fromGeometry(Point.fromLngLat(row.longitude, row.latitude))
                 feature.addStringProperty("title", LocationLabelStyle.truncateTitle(row.title))
+                feature.addBooleanProperty("is_fav", row.isFav)
                 feature
             }
             Handler(Looper.getMainLooper()).post {
@@ -1029,9 +1044,10 @@ class MainActivity : AppCompatActivity() {
         if (candidates.size == 1) {
             val def = candidates[0]
             AlertDialog.Builder(this, R.style.Theme_DalilAlBar_NeonDialog)
-                .setTitle("تحميل الخريطة دون انترنت")
-                .setMessage("هل تريد تحميل خريطة ${def.arabicName} لاستخدامها بلا انترنت؟")
-                .setPositiveButton("تحميل") { _, _ -> downloadRegions(listOf(def)) }
+                .setTitle("تحميل بيانات ${def.arabicName} دون انترنت")
+                .setItems(arrayOf("تحميل الخريطة", "تحميل بيانات مسار السيارة")) { _, which ->
+                    if (which == 0) downloadRegions(listOf(def)) else downloadRoadNetworks(listOf(def))
+                }
                 .setNegativeButton("ليس الآن", null)
                 .show()
         } else {
@@ -1041,9 +1057,19 @@ class MainActivity : AppCompatActivity() {
                 .setMultiChoiceItems(candidates.map { it.arabicName }.toTypedArray(), checked) { _, which, isChecked ->
                     checked[which] = isChecked
                 }
-                .setPositiveButton("تحميل المحدد") { _, _ ->
+                .setPositiveButton("متابعة") { _, _ ->
                     val selected = candidates.filterIndexed { i, _ -> checked[i] }
-                    if (selected.isNotEmpty()) downloadRegions(selected)
+                    if (selected.isNotEmpty()) {
+                        // طُلب صراحةً (٢٠٢٦-١١-٢٣): فصل زر "تحميل الخرائط" إلى خيارين منفصلين —
+                        // تحميل الخريطة نفسها (بلاطات العرض)، أو تحميل بيانات مسار السيارة (شبكة
+                        // طرق/دروب Overpass الحقيقية) بشكل مستقل عن الآخر.
+                        AlertDialog.Builder(this, R.style.Theme_DalilAlBar_NeonDialog)
+                            .setTitle("نوع التحميل")
+                            .setItems(arrayOf("تحميل الخريطة", "تحميل بيانات مسار السيارة")) { _, which ->
+                                if (which == 0) downloadRegions(selected) else downloadRoadNetworks(selected)
+                            }
+                            .show()
+                    }
                 }
                 .setNegativeButton("ليس الآن", null)
                 .show()
@@ -1053,6 +1079,76 @@ class MainActivity : AppCompatActivity() {
     private fun downloadRegions(defs: List<OfflineRegionDef>) {
         defs.forEach { downloadingRegionIds.add(it.id) }
         downloadNextOfflineRegion(defs.toMutableList())
+    }
+
+    /**
+     * تحميل بيانات مسار السيارة (شبكة طرق/دروب Overpass حقيقية) لمنطقة أو أكثر، مستقل تماماً عن تحميل
+     * بلاطات الخريطة (downloadRegions). يُستخدم عند اختيار "تحميل بيانات مسار السيارة" في قائمة
+     * الاختيار الجديدة. تنويه صريح: هذا استعلام شبكي ثقيل لمنطقة قد تبلغ مساحة دولة كاملة؛ لا يوجد
+     * تحكّم حقيقي بـ"توقف مؤقت" هنا (الاستئناف الجزئي لاستعلامات Overpass غير مدعوم)، فزر "توقف مؤقت"
+     * من نافذة التقدّم المشتركة مخفي لهذا النوع من التحميل تحديداً.
+     */
+    private fun downloadRoadNetworks(defs: List<OfflineRegionDef>) {
+        downloadNextRoadNetwork(defs.toMutableList())
+    }
+
+    private fun downloadNextRoadNetwork(queue: MutableList<OfflineRegionDef>) {
+        if (queue.isEmpty()) return
+        val def = queue.removeAt(0)
+        val dialogView = layoutInflater.inflate(R.layout.dialog_download_progress, null)
+        val tvName = dialogView.findViewById<android.widget.TextView>(R.id.tvDownloadRegionName)
+        val progressBar = dialogView.findViewById<android.widget.ProgressBar>(R.id.progressBarDownload)
+        val tvPercent = dialogView.findViewById<android.widget.TextView>(R.id.tvDownloadPercent)
+        val btnPause = dialogView.findViewById<android.widget.Button>(R.id.btnDownloadPause)
+        val btnCancel = dialogView.findViewById<android.widget.Button>(R.id.btnDownloadCancel)
+        val btnBackground = dialogView.findViewById<android.widget.Button>(R.id.btnDownloadBackground)
+        tvName.text = "بيانات مسار السيارة: ${def.arabicName}"
+        btnPause.visibility = View.GONE // لا يوجد استئناف جزئي حقيقي لاستعلامات Overpass هنا
+
+        var cancelled = false
+        val dialog = AlertDialog.Builder(this, R.style.Theme_DalilAlBar_NeonDialog)
+            .setView(dialogView)
+            .setCancelable(false)
+            .create()
+        btnCancel.setOnClickListener {
+            // لا يملك هذا المسار آلية حقيقية لإيقاف طلبات الشبكة الجارية فعلياً؛ هذا يوقف الواجهة
+            // والاستجابة لنتيجته فقط (صدقاً، لا ندّعي إلغاءً فورياً للاتصال الشبكي نفسه).
+            cancelled = true
+            dialog.dismiss()
+            downloadNextRoadNetwork(queue)
+        }
+        btnBackground.setOnClickListener { dialog.dismiss() }
+        dialog.show()
+
+        offlineController.downloadRoadNetwork(
+            def,
+            object : OfflineRegionsController.RoadNetworkProgressListener {
+                override fun onProgress(d: OfflineRegionDef, percent: Int) {
+                    if (cancelled) return
+                    progressBar.progress = percent
+                    tvPercent.text = "$percent%"
+                }
+
+                override fun onComplete(d: OfflineRegionDef, failedCells: Int, totalCells: Int) {
+                    if (cancelled) return
+                    if (dialog.isShowing) dialog.dismiss()
+                    val msg = if (failedCells > 0) {
+                        "تم الحفظ جزئياً لمنطقة ${d.arabicName} (فشلت $failedCells من $totalCells خلية جغرافية — ستعتمد بعض المناطق الفرعية على الإنترنت المباشر وقت التنقّل)"
+                    } else {
+                        "تم حفظ بيانات مسار السيارة كاملة لمنطقة ${d.arabicName}"
+                    }
+                    Toast.makeText(this@MainActivity, msg, Toast.LENGTH_LONG).show()
+                    downloadNextRoadNetwork(queue)
+                }
+
+                override fun onDownloadError(d: OfflineRegionDef, message: String) {
+                    if (cancelled) return
+                    if (dialog.isShowing) dialog.dismiss()
+                    Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()
+                    downloadNextRoadNetwork(queue)
+                }
+            }
+        )
     }
 
     private fun downloadNextOfflineRegion(queue: MutableList<OfflineRegionDef>) {

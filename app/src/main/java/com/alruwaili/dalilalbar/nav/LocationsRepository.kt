@@ -17,7 +17,11 @@ import java.io.FileOutputStream
  */
 class LocationsRepository(private val context: Context) {
 
-    data class LocationRow(val id: Long, val title: String, val latitude: Double, val longitude: Double)
+    data class LocationRow(
+        val id: Long, val title: String, val latitude: Double, val longitude: Double,
+        /** مأخوذ من عمود is_fav الحقيقي في الجدول (١ = مُفضَّلة/معلَّمة من المستخدم، ٠ = غير ذلك). */
+        val isFav: Boolean
+    )
 
     private var db: SQLiteDatabase? = null
 
@@ -49,7 +53,7 @@ class LocationsRepository(private val context: Context) {
         val database = ensureOpen() ?: return emptyList()
         val result = ArrayList<LocationRow>()
         val cursor = database.rawQuery(
-            "SELECT _id, title, latitude, longitude FROM locations " +
+            "SELECT _id, title, latitude, longitude, is_fav FROM locations " +
                 "WHERE latitude BETWEEN ? AND ? AND longitude BETWEEN ? AND ? " +
                 "AND title IS NOT NULL AND trim(title) != '' " +
                 "LIMIT ?",
@@ -62,7 +66,8 @@ class LocationsRepository(private val context: Context) {
                         id = it.getLong(0),
                         title = it.getString(1),
                         latitude = it.getDouble(2),
-                        longitude = it.getDouble(3)
+                        longitude = it.getDouble(3),
+                        isFav = it.getInt(4) != 0
                     )
                 )
             }
@@ -80,7 +85,7 @@ class LocationsRepository(private val context: Context) {
         val result = ArrayList<LocationRow>()
         val likePattern = "%" + query.trim() + "%"
         val cursor = database.rawQuery(
-            "SELECT _id, title, latitude, longitude FROM locations " +
+            "SELECT _id, title, latitude, longitude, is_fav FROM locations " +
                 "WHERE title LIKE ? AND title IS NOT NULL AND trim(title) != '' " +
                 "ORDER BY length(title) ASC LIMIT ?",
             arrayOf(likePattern, limit.toString())
@@ -92,7 +97,8 @@ class LocationsRepository(private val context: Context) {
                         id = it.getLong(0),
                         title = it.getString(1),
                         latitude = it.getDouble(2),
-                        longitude = it.getDouble(3)
+                        longitude = it.getDouble(3),
+                        isFav = it.getInt(4) != 0
                     )
                 )
             }
