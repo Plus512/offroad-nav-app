@@ -35,7 +35,16 @@ object OverpassClient {
     // مهلة اتصال HTTP الخاصة بنا يجب أن تكون أكبر من أعلى مهلة [timeout:N] مطلوبة من خادم Overpass
     // نفسه في أي من الاستعلامات أدناه (٣٠ ثانية لاستعلام الممر)، وإلا قد نقطع الاتصال قبل أن يستجيب
     // الخادم نفسه بفشل حقيقي، فنُعامل استعلاماً لا يزال يعمل كأنه خطأ اتصال.
-    private const val TIMEOUT_MS = 35000
+    // ملاحظة (٢٣ نوفمبر): connectTimeout وreadTimeout مرحلتان منفصلتان في HttpURLConnection — إن
+    // تعطّل الاتصال بالكامل (لا استجابة إطلاقاً من الخادم، كما في شبكة تحجب هذا النطاق)، أسوأ حالة
+    // لكل خادم واحد هي connectTimeout + readTimeout معاً، أي كانت تصل فعلياً حتى ٧٠ ثانية × ٣ خوادم
+    // = ١٧٥–٢١٠ ثانية (نحو ٣.٥ دقيقة) من التجمّد الظاهري دون أي تحديث على الشاشة قبل ولو فشل خلية
+    // واحدة — وهذا يطابق تماماً ما أبلغ عنه المستخدم (توقف عند 0% لأربع دقائق ثم فشل). تخفيضها هنا
+    // يقلّص أسوأ حالة انتظار لكل خادم تقريباً إلى النصف، دون كسر أي استعلام بطيء لكنه يعمل فعلاً
+    // (لا يزال أكبر من أعلى مهلة [timeout:N] أعلاه). هذا لا يُصلح عدم القدرة الفعلية على الوصول إلى
+    // خوادم Overpass من شبكته إن كانت محجوبة فعلاً — فقط يجعل الفشل يظهر أسرع بدل أن يبدو "متجمّداً".
+    private const val CONNECT_TIMEOUT_MS = 10000
+    private const val READ_TIMEOUT_MS = 26000
 
     // أنواع ليست طرقاً/دروباً صالحة لسيارة: ممرات مشاة ودراجات وسلالم وممرات غير مستخدمة فعلياً، إلخ.
     private const val EXCLUDED_HIGHWAY =
@@ -117,8 +126,8 @@ object OverpassClient {
     @Throws(OverpassException::class)
     private fun executeOn(endpoint: String, query: String): RoadNetwork {
         val connection = URL(endpoint).openConnection() as HttpURLConnection
-        connection.connectTimeout = TIMEOUT_MS
-        connection.readTimeout = TIMEOUT_MS
+        connection.connectTimeout = CONNECT_TIMEOUT_MS
+        connection.readTimeout = READ_TIMEOUT_MS
         connection.requestMethod = "POST"
         // توثيق Overpass API الرسمي (wiki.openstreetmap.org/wiki/Overpass_API) يوصي بإرسال
         // الاستعلام عبر POST بترميز form، وليس عبر GET مع وضع الاستعلام كاملاً داخل رابط URL —

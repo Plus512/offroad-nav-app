@@ -21,6 +21,7 @@
     <string name="no_downloaded_maps">لا توجد خرائط محمَّلة حالياً</string>
     <string name="delete">حذف</string>
     <string name="map_deleted">تم حذف خريطة %1$s</string>
+    <string name="download_new_map">تحميل / إعادة تحميل خريطة</string>
     <string name="end_trip">إنهاء الرحلة</string>
     <string name="trip_ended">تم إنهاء الرحلة</string>
     <string name="close_compass_panel">رجوع إلى الوضع العادي</string>

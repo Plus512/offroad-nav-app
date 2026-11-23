@@ -69,6 +69,13 @@ import org.maplibre.geojson.Point
  */
 class MainActivity : AppCompatActivity() {
 
+    companion object {
+        /** مفتاح Intent يطلب فتح نافذة اختيار "تحميل/إعادة تحميل الخريطة دون انترنت" مباشرة، بصرف
+         * النظر عن موقع المستخدم الحالي — يُستخدم من زر "تحميل خريطة جديدة" في شاشة الإعدادات، لأن
+         * التحميل التلقائي يعتمد فقط على GPS الحالي ولا يملك أي زر "إعادة محاولة" يدوي قبل هذا. */
+        const val EXTRA_SHOW_DOWNLOAD_PICKER = "show_download_picker"
+    }
+
     private lateinit var binding: ActivityMainBinding
     private lateinit var locationManager: LocationManager
     private var firstFixHandled = false
@@ -210,6 +217,8 @@ class MainActivity : AppCompatActivity() {
 
         offlineController = OfflineRegionsController(applicationContext)
         offlineController.listDownloadedIds { ids -> downloadedRegionIds.addAll(ids) }
+
+        handleShowDownloadPickerExtra(intent)
 
         binding.map.getMapAsync { map ->
             mapLibreMapOrNull = map
@@ -1038,6 +1047,22 @@ class MainActivity : AppCompatActivity() {
         if (key == lastOfflinePromptKey) return
         lastOfflinePromptKey = key
         promptDownload(candidates)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleShowDownloadPickerExtra(intent)
+    }
+
+    /** يفتح نافذة اختيار تحميل الخريطة/بيانات مسار السيارة يدوياً لكل المناطق المعرَّفة (وليس فقط
+     * المنطقة التي يتواجد فيها المستخدم حالياً حسب GPS) — استجابةً لزر "تحميل خريطة جديدة" اليدوي
+     * في شاشة الإعدادات، إذ لم يكن هناك أي وسيلة لإعادة محاولة التحميل يدوياً قبل هذا. */
+    private fun handleShowDownloadPickerExtra(intent: Intent) {
+        if (intent.getBooleanExtra(EXTRA_SHOW_DOWNLOAD_PICKER, false)) {
+            intent.removeExtra(EXTRA_SHOW_DOWNLOAD_PICKER)
+            promptDownload(OfflineRegionDef.entries)
+        }
     }
 
     private fun promptDownload(candidates: List<OfflineRegionDef>) {

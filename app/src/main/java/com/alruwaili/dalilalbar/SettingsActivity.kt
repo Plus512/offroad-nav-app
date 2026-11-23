@@ -1,5 +1,6 @@
 package com.alruwaili.dalilalbar
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.Gravity
 import android.widget.Button
@@ -25,6 +26,19 @@ class SettingsActivity : AppCompatActivity() {
         offlineController = OfflineRegionsController(applicationContext)
 
         loadDownloadedMaps()
+
+        // طُلب صراحةً (٢٣ نوفمبر): لم يكن هناك أي زر لإعادة محاولة التحميل يدوياً من هذه الشاشة —
+        // فقط عرض/حذف لما تم تحميله فعلاً. هذا الزر يعيد فتح نافذة الاختيار نفسها في MainActivity
+        // (تحميل الخريطة / تحميل بيانات مسار السيارة) لكل المناطق المعرَّفة، وليس فقط منطقة GPS
+        // الحالية. CLEAR_TOP تعيد استخدام نسخة MainActivity الموجودة فعلاً أسفل هذه الشاشة في نفس
+        // المهمة (task) وتُسلّمها الـIntent عبر onNewIntent، بدل إنشاء نسخة جديدة.
+        findViewById<Button>(R.id.btnDownloadNewMap).setOnClickListener {
+            val intent = Intent(this, MainActivity::class.java)
+                .putExtra(MainActivity.EXTRA_SHOW_DOWNLOAD_PICKER, true)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            startActivity(intent)
+            finish()
+        }
     }
 
     private fun loadDownloadedMaps() {

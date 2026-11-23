@@ -1216,7 +1216,7 @@
           16,
           0.85
         ],
-        "fill-color": "#B9A066",
+        "fill-color": "#6FA8C8",
         "fill-translate-anchor": "map"
       }
     },
@@ -1234,7 +1234,7 @@
         "wetland"
       ],
       "paint": {
-        "line-color": "#8C7239",
+        "line-color": "#2E6F93",
         "line-width": [
           "interpolate",
           [
