@@ -66,19 +66,30 @@ object RoutingEngine {
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    // يُضبط مرة واحدة من MainActivity.onCreate (applicationContext) — يُستخدم فقط لفحص وجود شبكة
-    // طرق محمَّلة مسبقاً محلياً (زر "تحميل بيانات مسار السيارة" الجديد) قبل أي طلب Overpass مباشر. إن
-    // بقي null (لم يُضبط لأي سبب) يستمر السلوك تماماً كالسابق: طلب Overpass المباشر فقط، دون أي تغيير.
+    // يُضبط مرة واحدة من MainActivity.onCreate (applicationContext) — يُستخدم لقراءة شبكة الطرق
+    // المحمَّلة مسبقاً محلياً عبر "تحميل بيانات مسار السيارة".
     var appContext: Context? = null
 
-    /** يحاول استخدام شبكة محمَّلة محلياً أولاً (بلا إنترنت)، فإن لم توجد يطلب Overpass المباشر كالمعتاد. */
-    private fun fetchNetworkPreferCache(south: Double, west: Double, north: Double, east: Double): RoadNetwork {
-        val ctx = appContext
-        if (ctx != null) {
-            val cached = RoadNetworkCache.loadCovering(ctx, south, west, north, east)
-            if (cached != null && cached.ways.isNotEmpty()) return cached
+    /** رسالة الخطأ الموحَّدة حين لا توجد بيانات طرق محمَّلة محلياً تغطّي المنطقة المطلوبة. */
+    private const val NO_CACHED_DATA_MESSAGE =
+        "لا توجد بيانات طرق محمَّلة مسبقاً لهذه المنطقة. اضغط ☰ ← \"تحميل بيانات مسار السيارة\" لهذه المنطقة أولاً، ثم أعد المحاولة"
+
+    /**
+     * يقرأ شبكة الطرق من البيانات المحمَّلة محلياً فقط (بلا إنترنت) — مطابقةً تماماً لطريقة عمل تطبيقَي
+     * المستخدم الآخرين («خرائط الصحراء الدليلة» و«الدليلة +»)، حيث تُحمَّل بيانات مسار السيارة مرة واحدة
+     * لكل منطقة (كملف منفصل عن الخريطة نفسها) ثم يعمل حساب المسار بالكامل محلياً دون أي اعتماد على نجاح
+     * اتصال حيّ لحظة حساب كل مسار. هذا هو السبب الحقيقي الذي جعل توجيه السيارة في تطبيقيه الآخرين يعمل
+     * بثبات، بخلاف الاعتماد السابق هنا على طلب Overpass حيّ وقت الحساب (غير مضمون، وبطيء، ويفشل كثيراً).
+     * لم يعد هناك أي طلب Overpass حيّ وقت حساب المسار إطلاقاً — فقط عند الضغط الصريح على زر التحميل.
+     */
+    @Throws(OverpassClient.OverpassException::class)
+    private fun fetchCachedNetwork(south: Double, west: Double, north: Double, east: Double): RoadNetwork {
+        val ctx = appContext ?: throw OverpassClient.OverpassException(NO_CACHED_DATA_MESSAGE)
+        val cached = RoadNetworkCache.loadCovering(ctx, south, west, north, east)
+        if (cached == null || cached.ways.isEmpty()) {
+            throw OverpassClient.OverpassException(NO_CACHED_DATA_MESSAGE)
         }
-        return OverpassClient.fetchRoadNetwork(south, west, north, east)
+        return cached
     }
 
     /**
@@ -95,6 +106,14 @@ object RoutingEngine {
             future.get(remaining, TimeUnit.MILLISECONDS)
         } catch (e: TimeoutException) {
             null
+        } catch (e: java.util.concurrent.ExecutionException) {
+            // BUG حقيقي تم اكتشافه وإصلاحه الآن: كانت هذه الدالة تُستخدَم فقط لعمليات لا تَرمي استثناءً
+            // (بناء الرسم البياني + Dijkstra)، فلم تكن بحاجة لمعالجة ExecutionException. لكن عند
+            // استخدامها الآن لتغليف طلب Overpass الشبكي نفسه (الذي قد يَرمي OverpassException)، فإن أي
+            // استثناء يحدث داخل [block] يصل هنا مغلَّفاً تلقائياً بـ ExecutionException من Future.get —
+            // فيجب فكّ الغلاف وإعادة رمي السبب الأصلي، وإلا لن يتطابق مع أي "catch" لـ OverpassException
+            // في الكود المستدعي (ستفشل المطابقة بصمت ويظهر الخطأ كأنه غير معالَج إطلاقاً).
+            throw (e.cause ?: e)
         } finally {
             executor.shutdownNow()
         }
@@ -163,10 +182,14 @@ object RoutingEngine {
             return computeLongDistanceCarRoute(user, destination, straightDistance, deadlineAtMs)
         }
 
+        // تغيير معماري مطلوب صراحةً: لم يعد حساب المسار يطلب بيانات الطرق حيّة من Overpass إطلاقاً هنا —
+        // فقط يقرأ من البيانات المحمَّلة مسبقاً محلياً (زر "تحميل بيانات مسار السيارة")، تماماً كما يعمل
+        // تطبيقا المستخدم الآخران («خرائط الصحراء الدليلة» و«الدليلة +»). إن لم تكن بيانات هذه المنطقة
+        // محمَّلة، يظهر فوراً طلب واضح بتحميلها أولاً بدل محاولة اتصال حيّ غير مضمون وبطيء.
         val network = try {
-            fetchNetworkPreferCache(south, west, north, east)
+            fetchCachedNetwork(south, west, north, east)
         } catch (e: OverpassClient.OverpassException) {
-            return straightFallback(user, destination, straightDistance, e.message ?: "تعذّر جلب بيانات الطرق الحقيقية")
+            return straightFallback(user, destination, straightDistance, e.message ?: NO_CACHED_DATA_MESSAGE)
         }
 
         if (network.ways.isEmpty()) {
@@ -244,13 +267,20 @@ object RoutingEngine {
             GeoMath.destinationPoint(user, rightBearing, CORRIDOR_HALF_WIDTH_METERS)
         )
 
+        // تغيير معماري مطلوب صراحةً: لا يُستعلَم Overpass حيّاً هنا أيضاً — نقرأ فقط من بيانات الطرق
+        // المحمَّلة مسبقاً محلياً التي تغطّي صندوق الممر (أصغر مستطيل يحوي كل رؤوسه)، تماماً كمسار
+        // المسافات القصيرة أعلاه. إن لم تكن بيانات الدول التي يمرّ بها الممر محمَّلة، يظهر طلب تحميلها.
         val networks = ArrayList<RoadNetwork>()
+        val corridorSouth = corridorPolygon.minOf { it.latitude }
+        val corridorNorth = corridorPolygon.maxOf { it.latitude }
+        val corridorWest = corridorPolygon.minOf { it.longitude }
+        val corridorEast = corridorPolygon.maxOf { it.longitude }
         try {
-            networks.add(OverpassClient.fetchRoadNetworkInPolygon(corridorPolygon))
+            networks.add(fetchCachedNetwork(corridorSouth, corridorWest, corridorNorth, corridorEast))
         } catch (e: OverpassClient.OverpassException) {
             return straightFallback(
                 user, destination, straightDistance,
-                "$tooFarReason، وتعذّر جلب بيانات الممر (${e.message ?: "خطأ اتصال"})"
+                "$tooFarReason، و${e.message ?: NO_CACHED_DATA_MESSAGE}"
             )
         }
 
@@ -262,7 +292,7 @@ object RoutingEngine {
         }
 
         fun localNetwork(center: LatLng): RoadNetwork? = try {
-            fetchNetworkPreferCache(
+            fetchCachedNetwork(
                 center.latitude - ENDPOINT_LOCAL_HALF_DEGREES,
                 center.longitude - ENDPOINT_LOCAL_HALF_DEGREES,
                 center.latitude + ENDPOINT_LOCAL_HALF_DEGREES,
