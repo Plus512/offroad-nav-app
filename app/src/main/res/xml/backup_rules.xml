@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    CompassApp Backup Rules — Billing Security
+    subscription_prefs.xml contains: trial start timestamp, purchase state,
+    purchase token, clock verification state, Block Store persistence flag.
+    MUST be excluded from all backup types to prevent trial bypass via backup restore.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="subscription_prefs.xml"/>
+    <exclude domain="sharedpref" path="subscription_prefs.xml.bak"/>
+    <exclude domain="database" path="subscription_prefs.xml"/>
+</full-backup-content>
