@@ -328,7 +328,7 @@ class SavedItemsActivity : AppCompatActivity() {
         // عمود الأزرار (⋮ ثم القلب) على الجهة المقابلة للدبوس، كما في الصورة المرجعية بالضبط.
         val actionsCol = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val menuBtn = ImageButton(this).apply {
-            setImageResource(com.alruwaili.garminalbarr.legacymap.R.drawable.ic_menu_hamburger)
+            setImageResource(com.alruwaili.garminalbarr.R.drawable.ic_menu_hamburger)
             background = null
             setColorFilter(neon(R.color.neon_green_dim))
             setOnClickListener { showPlaceMenu(it, place) }
@@ -441,7 +441,7 @@ class SavedItemsActivity : AppCompatActivity() {
         }
 
         val menuBtn = ImageButton(this).apply {
-            setImageResource(com.alruwaili.garminalbarr.legacymap.R.drawable.ic_menu_hamburger)
+            setImageResource(com.alruwaili.garminalbarr.R.drawable.ic_menu_hamburger)
             background = null
             setColorFilter(neon(R.color.neon_green_dim))
             setOnClickListener { showTrackMenu(it, track) }
