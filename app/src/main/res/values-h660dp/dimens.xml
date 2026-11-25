@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Comfortable spacing. Android automatically picks THIS file
+        instead of values/dimens.xml on any screen whose
+        available height is 660dp or more — no code changes needed,
+        no manual device detection. Taller screens get a bit more
+        breathing room instead of looking unnecessarily cramped.
+    -->
+    <dimen name="paywall_top_gap">16dp</dimen>
+    <dimen name="paywall_section_gap">12dp</dimen>
+    <dimen name="paywall_section_gap_small">8dp</dimen>
+    <dimen name="paywall_feature_gap">6dp</dimen>
+    <dimen name="paywall_card_gap">6dp</dimen>
+</resources>

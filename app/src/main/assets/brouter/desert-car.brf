@@ -1,0 +1,124 @@
+#
+# BRouter Desert Car & 4WD Profile
+# Optimized for offline navigation across GCC desert regions (Saudi Arabia, Jordan, UAE, Oman, etc.)
+# Allows standard paved roads while readily traversing desert tracks, unpaved graded roads, and sand trails.
+#
+
+---context:global
+
+assign validForCars        = true
+assign turnInstructionMode = 1
+assign pass1coefficient    = 1.3
+
+---context:way
+
+# Way access classification
+assign is_car_denied =
+    switch motorcar=no true
+    switch motor_vehicle=no true
+    switch access=no|private true
+    false
+
+assign is_car_allowed =
+    switch motorcar=yes|permissive|designated true
+    switch motor_vehicle=yes|permissive|designated true
+    switch access=yes|permissive true
+    false
+
+assign is_desert_track =
+    or highway=track
+    or surface=sand|dirt|unpaved|ground|gravel
+    tracktype=grade4|grade5
+
+assign is_highway_allowed =
+    highway=motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street|service|track|road
+
+assign caraccess =
+    if is_car_denied then false
+    else if is_car_allowed then true
+    else is_highway_allowed
+
+# Speeds according to road class and surface
+assign maxspeed_surface =
+    switch surface=sand 15
+    switch surface=dirt|ground 20
+    switch surface=unpaved|gravel 25
+    switch surface=compacted 35
+    999
+
+assign maxspeed_track =
+    switch tracktype=grade5 15
+    switch tracktype=grade4 20
+    switch tracktype=grade3 25
+    switch tracktype=grade2 35
+    switch tracktype=grade1 45
+    25
+
+assign base_speed =
+    switch highway=motorway|motorway_link 100
+    switch highway=trunk|trunk_link 100
+    switch highway=primary|primary_link 90
+    switch highway=secondary|secondary_link 70
+    switch highway=tertiary|tertiary_link 50
+    switch highway=unclassified 40
+    switch highway=residential|living_street 30
+    switch highway=service 25
+    switch highway=track|road maxspeed_track
+    0
+
+assign effective_speed =
+    min base_speed maxspeed_surface
+
+# Cost factors (lower = preferred)
+# Paved network: 1.00 - 1.20
+# Tracks & graded desert roads: 1.40 - 1.80 (low penalty for desert routing)
+# Sand / rough desert: 2.00 - 2.50
+assign costfactor =
+    if not caraccess then 9999
+    else if highway=motorway|motorway_link then 1.00
+    else if highway=trunk|trunk_link then 1.00
+    else if highway=primary|primary_link then 1.05
+    else if highway=secondary|secondary_link then 1.10
+    else if highway=tertiary|tertiary_link then 1.20
+    else if highway=unclassified then 1.30
+    else if highway=residential|living_street then 1.40
+    else if highway=service then 1.50
+    else if highway=track then (
+        if surface=sand then 1.80
+        else if tracktype=grade4|grade5 then 1.60
+        else 1.40
+    )
+    else if is_desert_track then 1.60
+    else 1.50
+
+assign initialcost =
+    if not caraccess then 10000
+    else if highway=track then 15
+    else 0
+
+# Turn / Priority classification for hints
+assign priorityclassifier =
+    if ( highway=motorway|motorway_link ) then 30
+    else if ( highway=trunk|trunk_link ) then 28
+    else if ( highway=primary|primary_link ) then 26
+    else if ( highway=secondary|secondary_link ) then 24
+    else if ( highway=tertiary|tertiary_link ) then 22
+    else if ( highway=unclassified ) then 20
+    else if ( highway=residential|living_street ) then 14
+    else if ( highway=service ) then 10
+    else if ( highway=track ) then 6
+    else 2
+
+---context:node
+
+assign nodeaccess =
+    switch barrier=bollard|block|wall|fence|turnstile|cycle_barrier false
+    switch barrier=gate|lift_gate|swing_gate|cattle_grid|toll_booth true
+    switch motorcar=no false
+    switch access=no|private false
+    true
+
+assign initialcost =
+    if not nodeaccess then 1000000
+    else if barrier=gate|lift_gate|swing_gate then 200
+    else 0

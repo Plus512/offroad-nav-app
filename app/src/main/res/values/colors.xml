@@ -1,15 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="sand_bg">#C9A66B</color>
-    <color name="desert_brown">#5C3A21</color>
-    <color name="white">#FFFFFF</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="light_gray">#3f3f3f</color>
+    <color name="dark_gray">#2F2727</color>
+    <color name="light_black">#232222</color>
+    <color name="app_bg">#3f3f3f</color>
+    <color name="title_brown">#5B4630</color>             <!-- بني داكن -->
+    <color name="dark_neutral_gray">#4D4D4D</color>       <!-- رمادي داكن محايد -->
+    <color name="light_beige_bg">#F8F8F4</color>          <!-- بيج فاتح للخلفية -->
+    <color name="favorite_pink">#E75480</color>
+    <color name="dialog_background">#BCAAA4</color>  <!-- بني غامق كخلفية -->
+    <color name="dialog_title_color"> #3E2723</color> <!-- بني فاتح واضح للعنوان -->
+    <color name="dialog_item_text"> #3E2723</color>   <!-- بني فاتح للنصوص -->
+    <color name="dialog_negative_text">#2F2727</color> <!-- بني متوسط لزر الإلغاء -->
 
-    <!-- نظام الألوان الرقمي (نيون أخضر)، مطابق للمظهر المعتمد في "الدليلة بلس" (شاشة إدارة الخرائط):
-         خلفية شبه سوداء، حدود تركوازية للبطاقات، أخضر نيون للنصوص، وأخضر فاتح للعنصر النشط. -->
-    <color name="neon_bg">#0A0F0A</color>
-    <color name="neon_card_bg">#10231B</color>
-    <color name="neon_border_teal">#1FBFAE</color>
-    <color name="neon_green">#39FF6A</color>
-    <color name="neon_green_bright">#52FF7A</color>
-    <color name="neon_green_dim">#2BB84F</color>
+    <!-- VIP Activation Screen -->
+    <color name="vip_green">#2E7D32</color>
+    <color name="vip_btn_black">#1A1A1A</color>
+    <color name="edit_gray">#BDBDBD</color>
+    <color name="input_bg_gray">#E0E0E0</color>
+    <color name="pending_text_gray">#757575</color>
+
 </resources>

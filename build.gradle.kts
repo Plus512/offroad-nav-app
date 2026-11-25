@@ -1,5 +1,8 @@
-// Root build file — لا توجد إعدادات خاصة بالمشاريع هنا، فقط تعريف الإضافات (plugins) المستخدمة في app/build.gradle.kts
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
 plugins {
-    id("com.android.application") version "8.5.2" apply false
-    id("org.jetbrains.kotlin.android") version "2.2.0" apply false
+    alias(libs.plugins.android.application) apply false
+    alias(libs.plugins.kotlin.android) apply false
+    id("com.google.devtools.ksp") version "2.2.10-2.0.2" apply false
+    id("com.google.gms.google-services") version "4.5.0" apply false
+    id("com.google.firebase.crashlytics") version "3.0.2" apply false
 }

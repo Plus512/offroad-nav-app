@@ -1,0 +1,18 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Big star in the middle -->
+    <path
+        android:fillColor="#5B4630"
+        android:pathData="M12,2L14.3,9.7L22,12L14.3,14.3L12,22L9.7,14.3L2,12L9.7,9.7Z" />
+    <!-- Small star top left -->
+    <path
+        android:fillColor="#5B4630"
+        android:pathData="M5,4L6,6.5L8.5,7.5L6,8.5L5,11L4,8.5L1.5,7.5L4,6.5Z" />
+    <!-- Small star bottom right -->
+    <path
+        android:fillColor="#5B4630"
+        android:pathData="M19,16L19.8,18L21.8,18.8L19.8,19.6L19,21.6L18.2,19.6L16.2,18.8L18.2,18Z" />
+</vector>

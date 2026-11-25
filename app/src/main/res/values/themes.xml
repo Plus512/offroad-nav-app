@@ -1,62 +1,58 @@
-<?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <style name="Theme.DalilAlBar" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <item name="colorPrimary">@color/desert_brown</item>
-        <item name="colorPrimaryVariant">@color/desert_brown</item>
-        <item name="colorOnPrimary">@color/white</item>
-        <item name="colorSecondary">@color/sand_bg</item>
-        <item name="android:statusBarColor" tools:targetApi="21">@color/desert_brown</item>
+
+    <!-- ********** تعريف الألوان ********** -->
+            <!-- أحمر وردي للمفضلة -->
+
+    <!-- ********** ثيمات التطبيق الأساسية ********** -->
+    <style name="Base.Theme.CompassApp" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
     </style>
 
-    <!-- مظهر "رقمي" (أقرب تقريب ممكن بدون تضمين خط LCD فعلي غير متوفر لدينا للتحقق منه): أسود تقريباً
-         + حدود/نص أخضر نيون بخط عريض عريض التباعد، تُستخدم في كل النوافذ المنبثقة (AlertDialog) وشاشة
-         الإعدادات. ملاحظة أمانة: هذا تقريب بخط monospace عريض وتباعد حروف، وليس خط LCD رقمي حقيقي —
-         لم نضمّن ملف خط لأنه يتطلب تحميل أصل خط فعلي لم يُتحقَّق منه بعد. -->
-    <style name="Theme.DalilAlBar.NeonDialog" parent="Theme.MaterialComponents.DayNight.Dialog.Alert">
-        <item name="colorPrimary">@color/neon_green</item>
-        <item name="colorOnPrimary">@color/neon_bg</item>
-        <item name="colorSurface">@color/neon_card_bg</item>
-        <item name="colorOnSurface">@color/neon_green</item>
-        <item name="android:textColorPrimary">@color/neon_green</item>
-        <item name="android:textColorSecondary">@color/neon_green_dim</item>
-        <item name="android:background">@color/neon_card_bg</item>
-        <item name="buttonBarPositiveButtonStyle">@style/Widget.DalilAlBar.NeonDialogButton</item>
-        <item name="buttonBarNegativeButtonStyle">@style/Widget.DalilAlBar.NeonDialogButton</item>
-        <item name="buttonBarNeutralButtonStyle">@style/Widget.DalilAlBar.NeonDialogButton</item>
-        <!-- هذه الأسطر الثلاثة (بادئة android:) هي السبب الحقيقي لبقاء عناصر setItems() وزر "إلغاء"
-             بالأسود رغم تلوين العنوان بنجاح: الحوار يُبنى في الكود عبر android.app.AlertDialog (الكلاس
-             الأصلي من النظام)، وهذا الكلاس يقرأ فقط خصائص الثيم ذات بادئة android:، بينما كل ما أعلاه
-             من buttonBarPositiveButtonStyle/colorSurface/... بلا بادئة هي خصائص مكتبة AppCompat/Material
-             ولا يراها AlertDialog الأصلي إطلاقاً - لذلك كانت بلا أثر على الأزرار وعناصر setItems(). -->
-        <item name="android:textColorAlertDialogListItem">@color/neon_green</item>
-        <item name="android:buttonBarPositiveButtonStyle">@style/Widget.DalilAlBar.NeonDialogButton.Framework</item>
-        <item name="android:buttonBarNegativeButtonStyle">@style/Widget.DalilAlBar.NeonDialogButton.Framework</item>
-        <item name="android:buttonBarNeutralButtonStyle">@style/Widget.DalilAlBar.NeonDialogButton.Framework</item>
+    <style name="Theme.CompassApp" parent="Base.Theme.CompassApp" />
+
+    <style name="Theme.App.Starting" parent="Theme.SplashScreen">
+        <!-- Make the system splash transparent to avoid dual-splash flashes -->
+        <item name="windowSplashScreenBackground">@android:color/transparent</item>
+        <item name="windowSplashScreenAnimatedIcon">@android:color/transparent</item>
+        <item name="postSplashScreenTheme">@style/Theme.CustomSplash</item>
     </style>
 
-    <style name="Widget.DalilAlBar.NeonDialogButton" parent="Widget.MaterialComponents.Button.TextButton">
-        <item name="android:textColor">@color/neon_green_bright</item>
-        <item name="fontFamily">monospace</item>
-        <item name="android:textStyle">bold</item>
+    <style name="Theme.CustomSplash" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:windowBackground">@drawable/splash_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
     </style>
 
-    <!-- نفس تنسيق الزر أعلاه، لكن بأصل (parent) من إطار العمل نفسه (android:) كي يلتقطه
-         android.app.AlertDialog الأصلي عبر android:buttonBarPositiveButtonStyle وأخواتها. -->
-    <style name="Widget.DalilAlBar.NeonDialogButton.Framework" parent="@android:style/Widget.Holo.Button.Borderless.Small">
-        <item name="android:textColor">@color/neon_green_bright</item>
-        <item name="android:fontFamily">monospace</item>
-        <item name="android:textStyle">bold</item>
+    <!-- ********** أشكال ومكونات UI ********** -->
+    <style name="CircularShape" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">50%</item>
     </style>
 
-    <!-- نص "رقمي" عام (عناوين/أجسام نصوص شاشة الإعدادات) -->
-    <style name="TextAppearance.DalilAlBar.NeonDigital" parent="@android:style/TextAppearance">
-        <item name="android:fontFamily">monospace</item>
-        <item name="android:textStyle">bold</item>
-        <item name="android:textColor">@color/neon_green</item>
-        <item name="android:letterSpacing">0.03</item>
-        <item name="android:shadowColor">#8039FF6A</item>
-        <item name="android:shadowRadius">6</item>
-        <item name="android:shadowDx">0</item>
-        <item name="android:shadowDy">0</item>
+    <style name="CircleImageStyle" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">50%</item>
     </style>
+
+    <style name="CustomAlertDialogTheme" parent="Theme.AppCompat.Light.Dialog.Alert">
+        <item name="android:background">@color/dialog_background</item>
+        <item name="android:textColorPrimary">@color/dialog_title_color</item>
+        <item name="android:listMenuViewStyle">@style/CustomAlertDialogList</item>
+        <item name="android:textSize">@dimen/text_size_22sp</item> <!-- حجم أكبر للعنوان والنصوص -->
+    </style>
+
+    <style name="CustomAlertDialogList" parent="Widget.AppCompat.ListView">
+        <item name="android:textColor">@color/dialog_item_text</item>
+        <item name="android:textSize">@dimen/text_size_22sp</item> <!-- حجم أكبر لعناصر القائمة -->
+    </style>
+    <style name="MyTabTextStyle" parent="TextAppearance.Design.Tab">
+        <item name="android:textSize">22dp</item>  <!-- غيّري الرقم للحجم اللي يعجبك -->
+        <item name="android:textAllCaps">false</item> <!-- اختياري لو مش عايزة الحروف كلها كابيتال -->
+        <item name="android:textColor">#5B4630</item> <!-- نفس اللون اللي عندك -->
+        <item name="android:textStyle">bold</item> <!-- نفس اللون اللي عندك -->
+    </style>
+
+
 </resources>
