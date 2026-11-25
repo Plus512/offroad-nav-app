@@ -27,11 +27,15 @@ import com.alruwaili.dalilalbar.databinding.ActivityMainBinding
 import android.os.Handler
 import android.os.Looper
 import com.alruwaili.dalilalbar.nav.GeoMath
+import com.alruwaili.dalilalbar.nav.HeadingFilter
 import com.alruwaili.dalilalbar.nav.LocationLabelStyle
 import com.alruwaili.dalilalbar.nav.LocationsRepository
 import com.alruwaili.dalilalbar.nav.NavMode
+import com.alruwaili.dalilalbar.nav.PoiBottomSheet
 import com.alruwaili.dalilalbar.nav.RouteOutcome
+import com.alruwaili.dalilalbar.nav.RouteSlot
 import com.alruwaili.dalilalbar.nav.RoutingEngine
+import com.alruwaili.dalilalbar.nav.SlotType
 import com.alruwaili.dalilalbar.nav.TrackRecorder
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
@@ -117,6 +121,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var savedPlacesStore: com.alruwaili.dalilalbar.nav.SavedPlacesStore
     private lateinit var savedTracksStore: com.alruwaili.dalilalbar.nav.SavedTracksStore
     private var measuring = false
+
+    // ===== شاشة التوجيه بخانتين (PoiBottomSheet) — حالة "بانتظار اختيار من الخريطة" وآخر خانتين معروضتين =====
+    private var pendingPickSlot: SlotType? = null
+    private var activeBottomSheet: PoiBottomSheet? = null
+    private var lastPoiOrigin: RouteSlot? = null
+    private var lastPoiDestination: RouteSlot? = null
     private var measureStart: LatLng? = null
     private var activeDestination: LatLng? = null
     // اسم الوجهة المختارة (إن وُجد) لعرضه في شريط الملاحة السفلي النيون الجديد (navInfoBar).
@@ -130,11 +140,17 @@ class MainActivity : AppCompatActivity() {
     // ===== اتجاه الجهاز الحقيقي (بوصلة فعلية تدور مع دوران الهاتف، وليست رقماً ثابتاً) =====
     private lateinit var sensorManager: SensorManager
     private var rotationSensor: Sensor? = null
-    /** زاوية الشمال المغناطيسي/الحقيقي الحالية بالنسبة لاتجاه الهاتف، محدَّثة من حسّاس الجهاز فعلياً. */
+    /** زاوية الشمال المغناطيسي/الحقيقي الحالية بالنسبة لاتجاه الهاتف، بعد تنعيمها عبر HeadingFilter. */
     private var deviceAzimuthDegrees: Float = 0f
     private val rotationRaw = FloatArray(9)
     private val rotationRemapped = FloatArray(9)
     private val orientationRaw = FloatArray(3)
+
+    // ===== تنعيم إبرة البوصلة (منقول حرفياً من HeadingFilter.kt في خرائط الصحراء الدليلة) =====
+    // بدون هذا المرشِّح، كانت زاوية الجهاز الخام تُستخدَم مباشرة فترتعش إبرة البوصلة عند السكون.
+    private val headingFilter = HeadingFilter()
+    private var headingFilterInitialized = false
+    private var lastSensorTimestampNanos: Long = 0L
 
     private val orientationListener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent) {
@@ -151,7 +167,23 @@ class MainActivity : AppCompatActivity() {
             )
             SensorManager.getOrientation(rotationRemapped, orientationRaw)
             val azimuthDeg = Math.toDegrees(orientationRaw[0].toDouble())
-            deviceAzimuthDegrees = (((azimuthDeg + 360.0) % 360.0)).toFloat()
+            val rawAzimuth = (((azimuthDeg + 360.0) % 360.0)).toFloat()
+
+            if (!headingFilterInitialized) {
+                headingFilter.snapTo(rawAzimuth)
+                deviceAzimuthDegrees = rawAzimuth
+                lastSensorTimestampNanos = event.timestamp
+                headingFilterInitialized = true
+                refreshCompassAndPanel()
+                return
+            }
+
+            val dtSec = ((event.timestamp - lastSensorTimestampNanos) / 1_000_000_000f)
+                .let { if (it <= 0f) 0.02f else it }
+            lastSensorTimestampNanos = event.timestamp
+
+            val filtered = headingFilter.update(rawAzimuth, dtSec) ?: return
+            deviceAzimuthDegrees = filtered
             refreshCompassAndPanel()
         }
 
@@ -349,6 +381,13 @@ class MainActivity : AppCompatActivity() {
     // ===================== الملاحة: اللمس على الخريطة + المسار + البوصلة =====================
 
     private fun onMapTapped(point: LatLng) {
+        val pickSlot = pendingPickSlot
+        if (pickSlot != null) {
+            pendingPickSlot = null
+            val pickedName = findPlaceNameAt(point) ?: getString(R.string.unnamed_map_point)
+            openPoiBottomSheetForPick(pickSlot, RouteSlot(pickedName, point, isCurrentLocation = false))
+            return
+        }
         if (measuring) {
             if (measureStart == null) {
                 measureStart = point
@@ -364,9 +403,86 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val userLatLng = LatLng(loc.latitude, loc.longitude)
-        val distance = GeoMath.distanceMeters(userLatLng, point)
         val placeName = findPlaceNameAt(point)
-        showNavigationChoiceDialog(userLatLng, point, distance, placeName)
+        openPoiBottomSheet(userLatLng, point, placeName)
+    }
+
+    /** يفتح شاشة التوجيه بخانتين عند لمس نقطة على الخريطة، بخانة انطلاق = الموقع الحالي للمستخدم. */
+    private fun openPoiBottomSheet(user: LatLng, destination: LatLng, placeName: String?) {
+        val originSlot = RouteSlot(getString(R.string.current_location_label), user, isCurrentLocation = true)
+        val destSlot = RouteSlot(placeName ?: getString(R.string.unnamed_map_point), destination, isCurrentLocation = false)
+        showPoiBottomSheet(originSlot, destSlot)
+    }
+
+    /** يُعاد بعد اختيار "اختيار من الخريطة" إحدى الخانتين: يستعيد الخانة الأخرى المحفوظة ويفتح الشاشة مجدداً. */
+    private fun openPoiBottomSheetForPick(slot: SlotType, pickedValue: RouteSlot) {
+        val preservedOrigin = lastPoiOrigin ?: return
+        val preservedDestination = lastPoiDestination ?: return
+        val newOrigin = if (slot == SlotType.ORIGIN) pickedValue else preservedOrigin
+        val newDestination = if (slot == SlotType.DESTINATION) pickedValue else preservedDestination
+        showPoiBottomSheet(newOrigin, newDestination)
+    }
+
+    /** ينشئ ويعرض PoiBottomSheet فعلياً بخانتين محدَّدتين، ويربط كل أزرارها بوظائف دليل البر الحالية. */
+    private fun showPoiBottomSheet(originSlot: RouteSlot, destSlot: RouteSlot) {
+        lastPoiOrigin = originSlot
+        lastPoiDestination = destSlot
+        val initialBearing = GeoMath.bearingDegrees(originSlot.latLng, destSlot.latLng).toFloat()
+        val sheet = PoiBottomSheet(
+            activity = this,
+            origin = originSlot,
+            destination = destSlot,
+            categoryLabel = "",
+            initialHeadingDegrees = initialBearing,
+            onPickFromMap = { slot ->
+                pendingPickSlot = slot
+                val slotLabel = getString(
+                    if (slot == SlotType.ORIGIN) R.string.slot_origin_label else R.string.slot_destination_label
+                )
+                Toast.makeText(this, getString(R.string.tap_map_to_pick, slotLabel), Toast.LENGTH_LONG).show()
+            },
+            onUseCurrentLocation = { slot ->
+                val loc = lastLocation
+                if (loc == null) {
+                    Toast.makeText(this, R.string.need_user_location, Toast.LENGTH_SHORT).show()
+                } else {
+                    val newValue = RouteSlot(
+                        getString(R.string.current_location_label),
+                        LatLng(loc.latitude, loc.longitude),
+                        isCurrentLocation = true
+                    )
+                    if (slot == SlotType.ORIGIN) lastPoiOrigin = newValue else lastPoiDestination = newValue
+                    activeBottomSheet?.updateSlot(slot, newValue)
+                }
+            },
+            onSwap = { newOrigin, newDestination ->
+                lastPoiOrigin = newOrigin
+                lastPoiDestination = newDestination
+            },
+            onSave = { routeSlot -> showSaveLocationDialog(routeSlot.latLng) },
+            onShare = { routeSlot ->
+                val shareText = getString(
+                    R.string.share_place_text,
+                    routeSlot.title,
+                    routeSlot.latLng.latitude.toString(),
+                    routeSlot.latLng.longitude.toString()
+                )
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, shareText)
+                }
+                startActivity(Intent.createChooser(intent, getString(R.string.menu_share)))
+            },
+            onNavigate = { originRoute, destinationRoute, mode ->
+                startRouting(originRoute.latLng, destinationRoute.latLng, mode, destinationRoute.title)
+            },
+            onDismissed = {
+                // شاشة واحدة فقط تكون مفتوحة في كل مرة في هذا التطبيق، فلا حاجة لمقارنة المرجع.
+                activeBottomSheet = null
+            }
+        )
+        activeBottomSheet = sheet
+        sheet.show()
     }
 
     // ===================== أداة قياس المسافة (زر يمين الشاشة) =====================
@@ -665,27 +781,6 @@ class MainActivity : AppCompatActivity() {
         return null
     }
 
-    private fun showNavigationChoiceDialog(user: LatLng, destination: LatLng, distance: Double, placeName: String?) {
-        val title = if (placeName != null) {
-            getString(R.string.distance_to_named_point, placeName, GeoMath.formatDistance(distance))
-        } else {
-            getString(R.string.distance_to_point, GeoMath.formatDistance(distance))
-        }
-        AlertDialog.Builder(this, R.style.Theme_DalilAlBar_NeonDialog)
-            .setTitle(title)
-            .setItems(
-                arrayOf(getString(R.string.mode_straight), getString(R.string.mode_car), getString(R.string.save_location))
-            ) { _, which ->
-                when (which) {
-                    0 -> startRouting(user, destination, NavMode.STRAIGHT, placeName)
-                    1 -> startRouting(user, destination, NavMode.CAR, placeName)
-                    else -> showSaveLocationDialog(destination)
-                }
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
     private fun startRouting(user: LatLng, destination: LatLng, mode: NavMode, placeName: String? = null) {
         activeDestination = destination
         activeDestinationName = placeName
@@ -902,6 +997,17 @@ class MainActivity : AppCompatActivity() {
 
         binding.compassArrow.headingDegrees = displayHeading.toFloat()
         binding.compassArrow.pointsToDestination = hasTarget
+
+        // السهم المصغّر الحي في شاشة التوجيه بخانتين (PoiBottomSheet) إن كانت مفتوحة حالياً: نفس
+        // منطق طرح زاوية الجهاز بالضبط، لكن بين خانتي تلك الشاشة تحديداً لا بين الموقع والوجهة
+        // المفعَّلة للملاحة (قد تكون شاشة عرض فقط دون ملاحة فعلية بعد).
+        val sheetOrigin = lastPoiOrigin
+        val sheetDestination = lastPoiDestination
+        if (activeBottomSheet != null && sheetOrigin != null && sheetDestination != null) {
+            val sheetBearing = GeoMath.bearingDegrees(sheetOrigin.latLng, sheetDestination.latLng)
+            val sheetDisplayHeading = (((sheetBearing - deviceAzimuthDegrees) % 360.0) + 360.0) % 360.0
+            activeBottomSheet?.updateHeading(sheetDisplayHeading.toFloat())
+        }
 
         if (hasTarget) {
             val userLatLng = LatLng(loc!!.latitude, loc.longitude)
