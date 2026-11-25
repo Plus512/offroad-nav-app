@@ -121,7 +121,13 @@ class OsmdroidMapFragment : Fragment() {
     // ---- Active navigation & driving follow state ----
     enum class MapOrientationMode {
         NORTH_UP,   // Locked strictly to 0° True North; map never rotates; labels stay horizontal
-        COURSE_UP   // Dynamic heading rotation; gated by speed >= 1.5 m/s
+        // Dynamic heading rotation; gated by speed >= 1.5 m/s. DISABLED app-wide as of
+        // 2026-11-25 — nothing in this file sets orientationMode to COURSE_UP anymore
+        // (Mapsforge bakes place-name labels as pixels into the tiles, so rotating the
+        // canvas rotated the labels too, making them unreadable). The enum value and the
+        // COURSE_UP branches below are kept only so this can be re-enabled later if a
+        // proper un-rotated label layer is ever built.
+        COURSE_UP
     }
 
     private var orientationMode = MapOrientationMode.NORTH_UP
@@ -611,13 +617,12 @@ class OsmdroidMapFragment : Fragment() {
         saveActiveRoute(startGeo.latitude, startGeo.longitude, destGeo.latitude, destGeo.longitude, destName, isOriginCurrentLocation, isCarRoute = false)
         routeOverlay?.showRoute(startGeo, destGeo)
 
-        // Straight-Line Navigation from the user's position: rotate the map with the
-        // phone so the line always points the way the target really is.
+        // Course-Up disabled app-wide (2026-11-25): Mapsforge bakes place-name labels
+        // as pixels directly into the rendered tile bitmaps, so rotating the whole
+        // canvas in Course-Up rotated those baked-in labels too, making them unreadable.
+        // The map now always stays locked to true North regardless of travel direction.
         lastDirectLineAnchor = null
-        setOrientationMode(
-            if (isOriginCurrentLocation) MapOrientationMode.COURSE_UP else preferredOrientationMode(),
-            showToast = false
-        )
+        setOrientationMode(MapOrientationMode.NORTH_UP, showToast = false)
 
         activeDestGeo = destGeo
         activeDestName = destName
@@ -885,11 +890,9 @@ class OsmdroidMapFragment : Fragment() {
             smoothLocationOverlay?.setDrivingHeading(null)
         }
         if (!isCarRoute) {
+            // Course-Up disabled app-wide (2026-11-25) — see startNavigation() for why.
             lastDirectLineAnchor = null
-            setOrientationMode(
-                if (isOriginUser) MapOrientationMode.COURSE_UP else preferredOrientationMode(),
-                showToast = false
-            )
+            setOrientationMode(MapOrientationMode.NORTH_UP, showToast = false)
         }
         val initialOrientation = if (isOriginUser && orientationMode == MapOrientationMode.COURSE_UP) {
             NavigationMath.mapOrientationFor(smoothedHeading)
@@ -1014,6 +1017,15 @@ class OsmdroidMapFragment : Fragment() {
     /** يُستدعى بعد اكتمال تنزيل بلاطات تضاريس جديدة، كي تُعاد قراءتها من القرص بدل الاعتماد على ذاكرة قديمة. */
     fun refreshTerrainOverlay() {
         terrainOverlay?.invalidateCache()
+        mapView?.invalidate()
+    }
+
+    /**
+     * "الرؤية الصحراوية X-Ray" — يبدّل طبقة التضاريس بين التظليل العادي ووضع التحليل اللوني
+     * (ارتفاع + انحدار)، ويطلب إعادة رسم فورية كي يظهر التغيير دون الحاجة لتحريك الخريطة.
+     */
+    fun setTerrainXRayMode(enabled: Boolean) {
+        terrainOverlay?.setRenderMode(if (enabled) TerrainRenderMode.XRAY else TerrainRenderMode.HILLSHADE)
         mapView?.invalidate()
     }
 
@@ -1225,17 +1237,16 @@ class OsmdroidMapFragment : Fragment() {
     fun getOrientationMode(): MapOrientationMode = orientationMode
 
     /**
-     * Toggles between North-Up and Course-Up modes with immediate Arabic Toast feedback.
+     * Course-Up mode is disabled app-wide (2026-11-25 — see startNavigation() for why),
+     * so this no longer actually toggles anything: it just resets to North-Up and
+     * recenters, the same as [resetMapRotation]. Kept (rather than removed) so the
+     * existing compass dock button / side-dial button keep a harmless, useful action
+     * instead of becoming dead buttons.
      */
     fun toggleOrientationMode(): MapOrientationMode {
-        val newMode = if (orientationMode == MapOrientationMode.NORTH_UP) {
-            MapOrientationMode.COURSE_UP
-        } else {
-            MapOrientationMode.NORTH_UP
-        }
-        savePreferredOrientationMode(newMode)
-        setOrientationMode(newMode, showToast = true)
-        return newMode
+        savePreferredOrientationMode(MapOrientationMode.NORTH_UP)
+        setOrientationMode(MapOrientationMode.NORTH_UP, showToast = true)
+        return MapOrientationMode.NORTH_UP
     }
 
     /**
@@ -1287,13 +1298,12 @@ class OsmdroidMapFragment : Fragment() {
 
     // ======================== Compass rotation & follow helpers ========================
 
-    private fun preferredOrientationMode(): MapOrientationMode = try {
-        val name = requireContext().getSharedPreferences(NAV_PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_PREF_ORIENTATION, MapOrientationMode.NORTH_UP.name)
-        MapOrientationMode.valueOf(name ?: MapOrientationMode.NORTH_UP.name)
-    } catch (_: Exception) {
-        MapOrientationMode.NORTH_UP
-    }
+    /**
+     * Course-Up is disabled app-wide (2026-11-25), so this always returns NORTH_UP now —
+     * even if an older install already saved COURSE_UP to SharedPreferences before this
+     * change, it is never honored.
+     */
+    private fun preferredOrientationMode(): MapOrientationMode = MapOrientationMode.NORTH_UP
 
     private fun savePreferredOrientationMode(mode: MapOrientationMode) {
         try {

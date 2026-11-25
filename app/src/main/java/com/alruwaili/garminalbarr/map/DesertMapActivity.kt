@@ -30,11 +30,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -77,6 +81,15 @@ import com.alruwaili.garminalbarr.map.ui.CarRouteOptionsDialog
 import com.alruwaili.garminalbarr.map.ui.RouteSlot
 import com.alruwaili.garminalbarr.map.ui.SlotType
 import com.alruwaili.garminalbarr.map.ui.TrackRecordingHud
+import com.alruwaili.garminalbarr.map.ui.NetworkSpotterToggleButton
+import com.alruwaili.garminalbarr.network.NetworkSpotterService
+import com.alruwaili.garminalbarr.network.ui.NetworkSpotterHud
+import com.alruwaili.garminalbarr.CacheState
+import com.alruwaili.garminalbarr.LocationLightweight
+import com.alruwaili.garminalbarr.desertmind.ui.DesertMindDialog
+import com.alruwaili.garminalbarr.desertmind.DesertRadarEngine
+import com.alruwaili.garminalbarr.desertmind.ui.DesertRadarRadiusDialog
+import com.alruwaili.garminalbarr.desertmind.ui.DesertRadarSweepOverlay
 import com.alruwaili.garminalbarr.map.ui.SaveTrackDialog
 import com.alruwaili.garminalbarr.map.ui.DiscardTrackDialog
 import com.alruwaili.garminalbarr.track.RecordingStatus
@@ -126,6 +139,19 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
 
     private val trackRepository by lazy { TrackRepository(this) }
     private val recordingSnapshotState = mutableStateOf(TrackRecordingSnapshot())
+    private val isNetworkSpotterActiveState = mutableStateOf(false)
+    // "العقل الصحراوي الذكي" — dialog visibility + the cached locations list it reads from.
+    private val showDesertMindDialogState = mutableStateOf(false)
+    private val desertMindLocationsState = mutableStateOf<List<LocationLightweight>>(emptyList())
+    // "الرادار الصحراوي" — radius-picker visibility, then the active sweep's radius (km), or
+    // null when no sweep is running.
+    private val showDesertRadarPickerState = mutableStateOf(false)
+    private val activeDesertRadarKmState = mutableStateOf<Int?>(null)
+    // "الأدوات" — single menu gathering every new feature button added this session.
+    private val showToolsMenuState = mutableStateOf(false)
+    // "الرؤية الصحراوية X-Ray" — طبقة تحليلية (ارتفاع+انحدار) فوق الخريطة المسطحة الحالية،
+    // بديلة للتظليل العادي عند التفعيل فقط.
+    private val isXRayModeState = mutableStateOf(false)
     private val showSaveTrackDialog = mutableStateOf(false)
     private val showDiscardTrackDialog = mutableStateOf(false)
     private val showCarRouteOptionsDialog = mutableStateOf(false)
@@ -701,6 +727,24 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
             }
         }
 
+        // Collect "راصد الشبكة" running state from its service, independent of the track recorder.
+        lifecycleScope.launch {
+            NetworkSpotterService.isActive.collect { active ->
+                isNetworkSpotterActiveState.value = active
+            }
+        }
+
+        // "العقل الصحراوي الذكي" reads the same already-loaded app-wide locations cache
+        // used by landmark search (SharedLocationViewModel.globalLocationsCache) — no
+        // separate DB query of its own.
+        lifecycleScope.launch {
+            (application as MyApplication).sharedLocationViewModel.globalLocationsCache.collect { state ->
+                if (state is CacheState.Ready) {
+                    desertMindLocationsState.value = state.locations
+                }
+            }
+        }
+
         val composeOverlay = findViewById<androidx.compose.ui.platform.ComposeView>(R.id.compose_overlay_container)
         composeOverlay.setViewCompositionStrategy(
             androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed
@@ -720,6 +764,7 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
             val activeRouteName = activeRouteNameState.value
             val remainingMeters = remainingMetersState.value
             val recSnapshot = recordingSnapshotState.value
+            val isSpotterActive = isNetworkSpotterActiveState.value
 
             if (isManagerOpen) {
                 DownloadManagerScreen(
@@ -897,6 +942,156 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
                             )
                         }
                     }
+
+                    // "راصد الشبكة" (Network Spotter) floating toggle button, top-right of the
+                    // main map screen, independent of the track-recording / routing controls.
+                    if (pickingSlotType == null) {
+                        NetworkSpotterToggleButton(
+                            isActive = isSpotterActive,
+                            onClick = { toggleNetworkSpotter() },
+                            modifier = Modifier
+                                .align(AbsoluteAlignment.TopRight)
+                                .absolutePadding(top = 48.dp, right = 16.dp)
+                        )
+
+                        // "الأدوات" (Tools) — single floating button, directly below the
+                        // network-spotter toggle, gathering every new feature added this
+                        // session (العقل الصحراوي الذكي، الرادار الصحراوي، وما يُضاف لاحقًا)
+                        // under one menu instead of a separate icon per feature, per his
+                        // explicit instruction.
+                        Box(
+                            modifier = Modifier
+                                .align(AbsoluteAlignment.TopRight)
+                                .absolutePadding(top = 112.dp, right = 16.dp)
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = Color(0xE61F1A16),
+                                border = BorderStroke(1.dp, Color(0xFFDDA01E)),
+                                shadowElevation = 6.dp,
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clickable {
+                                        FeatureGatekeeper.guardAction(this@DesertMapActivity) {
+                                            showToolsMenuState.value = true
+                                        }
+                                    }
+                            ) {
+                                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                    Icon(
+                                        imageVector = Icons.Default.Build,
+                                        contentDescription = "الأدوات",
+                                        tint = Color(0xFFDDA01E),
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+
+                            DropdownMenu(
+                                expanded = showToolsMenuState.value,
+                                onDismissRequest = { showToolsMenuState.value = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("العقل الصحراوي الذكي") },
+                                    onClick = {
+                                        showToolsMenuState.value = false
+                                        showDesertMindDialogState.value = true
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("الرادار الصحراوي") },
+                                    onClick = {
+                                        showToolsMenuState.value = false
+                                        showDesertRadarPickerState.value = true
+                                    }
+                                )
+                                // "الرؤية الصحراوية X-Ray" — طبقة تحليلية (ارتفاع + انحدار)
+                                // فوق الخريطة المسطحة الحالية، بديلة للتظليل العادي فقط عند
+                                // التفعيل. ليست رؤية ثلاثية الأبعاد حقيقية — هذا ما اختاره
+                                // المستخدم صراحة من بين الخيارين المعروضين عليه.
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            if (isXRayModeState.value)
+                                                "إلغاء الرؤية الصحراوية X-Ray"
+                                            else
+                                                "تفعيل الرؤية الصحراوية X-Ray"
+                                        )
+                                    },
+                                    onClick = {
+                                        showToolsMenuState.value = false
+                                        val newValue = !isXRayModeState.value
+                                        isXRayModeState.value = newValue
+                                        osmdroidFragment?.setTerrainXRayMode(newValue)
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    if (showDesertMindDialogState.value) {
+                        val userLocNow = osmdroidFragment?.getCurrentUserLocation()
+                        val tripStart = TrackRecordingService.activePoints.firstOrNull()
+                        DesertMindDialog(
+                            currentLat = userLocNow?.latitude,
+                            currentLon = userLocNow?.longitude,
+                            allLocations = desertMindLocationsState.value,
+                            brouterEngine = brouterEngine,
+                            selectedPoi = selectedPoi.value,
+                            azimuthDeg = azimuthState.floatValue,
+                            tripStartLat = tripStart?.latitude,
+                            tripStartLon = tripStart?.longitude,
+                            onGoTo = { lat, lon, title ->
+                                desertMindNavigateTo(lat, lon, title)
+                                showDesertMindDialogState.value = false
+                            },
+                            onDismiss = { showDesertMindDialogState.value = false }
+                        )
+                    }
+
+                    if (showDesertRadarPickerState.value) {
+                        DesertRadarRadiusDialog(
+                            onStart = { radiusKm ->
+                                showDesertRadarPickerState.value = false
+                                activeDesertRadarKmState.value = radiusKm
+                            },
+                            onDismiss = { showDesertRadarPickerState.value = false }
+                        )
+                    }
+
+                    activeDesertRadarKmState.value?.let { radiusKm ->
+                        val userLocNow = osmdroidFragment?.getCurrentUserLocation()
+                        if (userLocNow == null) {
+                            LaunchedEffect(radiusKm) {
+                                Toast.makeText(this@DesertMapActivity, "يتعذّر تحديد موقعك الحالي الآن (GPS غير متاح بعد)", Toast.LENGTH_SHORT).show()
+                                activeDesertRadarKmState.value = null
+                            }
+                        } else {
+                            val radiusMeters = radiusKm * 1000.0
+                            val radarTargets = DesertRadarEngine.locationsWithinRadius(
+                                userLocNow.latitude, userLocNow.longitude,
+                                desertMindLocationsState.value, radiusMeters
+                            )
+                            DesertRadarSweepOverlay(
+                                targets = radarTargets,
+                                radiusMeters = radiusMeters,
+                                onGoTo = { lat, lon, title ->
+                                    desertMindNavigateTo(lat, lon, title)
+                                    activeDesertRadarKmState.value = null
+                                },
+                                onClose = { activeDesertRadarKmState.value = null }
+                            )
+                        }
+                    }
+
+                    // Top-of-screen red-blink HUD: visible proof that "راصد الشبكة" is recording.
+                    NetworkSpotterHud(
+                        isActive = isSpotterActive,
+                        onStopClick = { toggleNetworkSpotter() },
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 10.dp, start = 16.dp, end = 16.dp)
+                    )
 
                     // Track Recording Overlay: Trigger Pill or Live HUD
                     if (pickingSlotType == null) {
@@ -1403,6 +1598,82 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
             selectedPoi.value = poi
             activeDestSlotState.value = RouteSlot(poi.name, rawLat, rawLon, isCurrentLocation = false)
         }
+    }
+
+    /**
+     * Shared "اذهب إلى" helper for "العقل الصحراوي الذكي" and "الرادار الصحراوي" — both
+     * features only ever navigate from the user's current location to one named target
+     * point, so they share this single implementation (mirrors the existing
+     * onCompassNavigation path used by [PoiBottomSheet]) instead of duplicating it.
+     */
+    private fun desertMindNavigateTo(lat: Double, lon: Double, title: String) {
+        FeatureGatekeeper.guardAction(this@DesertMapActivity) {
+            val origin = osmdroidFragment?.getCurrentUserLocation()
+            if (origin == null ||
+                !MapNavigationHelper.isValidLatLon(origin.latitude, origin.longitude) ||
+                !MapNavigationHelper.isValidLatLon(lat, lon)
+            ) {
+                Toast.makeText(this@DesertMapActivity, "إحداثيات غير صالحة", Toast.LENGTH_SHORT).show()
+                return@guardAction
+            }
+            val originGeo = GeoPoint(origin.latitude, origin.longitude)
+            val destGeo = GeoPoint(lat, lon)
+            val started = osmdroidFragment?.startNavigation(
+                startGeo = originGeo,
+                destGeo = destGeo,
+                destName = title,
+                isOriginCurrentLocation = true
+            ) ?: false
+            if (started) {
+                hasActiveRouteState.value = true
+                isCarRouteState.value = false
+                activeOriginSlotState.value = RouteSlot(
+                    title = "موقعي الحالي",
+                    latitude = origin.latitude,
+                    longitude = origin.longitude,
+                    isCurrentLocation = true
+                )
+                activeDestSlotState.value = RouteSlot(title = title, latitude = lat, longitude = lon)
+                activeRouteNameState.value = title
+                remainingMetersState.value = NavigationMath.distanceMeters(
+                    origin.latitude, origin.longitude, lat, lon
+                )
+                bearingState.floatValue = NavigationMath.bearingDeg(
+                    origin.latitude, origin.longitude, lat, lon
+                )
+                selectedPoi.value = null
+            } else {
+                Toast.makeText(this@DesertMapActivity, "فشل بدء الملاحة", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun toggleNetworkSpotter() {
+        if (isNetworkSpotterActiveState.value) {
+            NetworkSpotterService.stop(this)
+            Toast.makeText(this, "تم إيقاف راصد الشبكة", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED) {
+            ensureLocationPermission()
+            return
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    NOTIFICATION_PERMISSION_REQUEST
+                )
+            }
+        }
+
+        NetworkSpotterService.start(this)
+        Toast.makeText(this, "تم تفعيل راصد الشبكة، سيتم تسجيل نقطة عند فقدان الشبكة تلقائيًا", Toast.LENGTH_SHORT).show()
     }
 
     private fun startTrackRecording() {

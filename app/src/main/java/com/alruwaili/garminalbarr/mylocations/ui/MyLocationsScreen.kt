@@ -85,6 +85,8 @@ import com.alruwaili.garminalbarr.map.MapNavigationHelper
 import com.alruwaili.garminalbarr.map.NavigationMath
 import com.alruwaili.garminalbarr.track.TrackEntity
 import com.alruwaili.garminalbarr.track.ui.SavedTracksTabContent
+import com.alruwaili.garminalbarr.network.SignalPointEntity
+import com.alruwaili.garminalbarr.network.ui.SignalPointsTabContent
 import java.util.Locale
 
 // Desert Theme Palette
@@ -117,7 +119,11 @@ fun MyLocationsScreen(
     onToggleTrackVisibility: (TrackEntity) -> Unit = {},
     onBacktrack: (TrackEntity) -> Unit = {},
     onExportGpx: (TrackEntity) -> Unit = {},
-    onDeleteTrack: (TrackEntity) -> Unit = {}
+    onDeleteTrack: (TrackEntity) -> Unit = {},
+    signalPoints: List<SignalPointEntity> = emptyList(),
+    onSignalPointGoTo: (SignalPointEntity) -> Unit = {},
+    onSignalPointRename: (SignalPointEntity, String?) -> Unit = { _, _ -> },
+    onSignalPointDelete: (SignalPointEntity) -> Unit = {}
 ) {
     var selectedTab by remember { mutableStateOf(initialTab) }
     var isSpeedDialOpen by remember { mutableStateOf(false) }
@@ -232,6 +238,23 @@ fun MyLocationsScreen(
                                 modifier = Modifier.padding(vertical = 7.dp)
                             )
                         }
+
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (selectedTab == 2) DesertGold else Color.Transparent,
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { selectedTab = 2 }
+                        ) {
+                            Text(
+                                text = "نقاط الشبكة (${signalPoints.size})",
+                                color = if (selectedTab == 2) Color.Black else DesertTan,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(vertical = 7.dp)
+                            )
+                        }
                     }
                 }
 
@@ -322,7 +345,7 @@ fun MyLocationsScreen(
                             }
                         }
                     }
-                } else {
+                } else if (selectedTab == 1) {
                     SavedTracksTabContent(
                         tracks = tracks,
                         onTrackClick = onTrackClick,
@@ -330,6 +353,17 @@ fun MyLocationsScreen(
                         onBacktrack = onBacktrack,
                         onExportGpx = onExportGpx,
                         onDeleteTrack = onDeleteTrack,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .weight(1f)
+                    )
+                } else {
+                    SignalPointsTabContent(
+                        points = signalPoints,
+                        currentLocation = currentLocation,
+                        onGoTo = onSignalPointGoTo,
+                        onRename = onSignalPointRename,
+                        onDelete = onSignalPointDelete,
                         modifier = Modifier
                             .fillMaxSize()
                             .weight(1f)

@@ -344,6 +344,62 @@ private fun MapControlsLayout(
 }
 
 /**
+ * Standalone floating toggle button for "راصد الشبكة" (Network / Signal Spotter).
+ * Shows a locked/off state (dim, gray border) when inactive, and an active state
+ * (red fill + border) when the spotter is running — a visual "تفعيل مقفل أو مفعل" cue
+ * independent of the top-of-screen red-blink HUD.
+ */
+@Composable
+fun NetworkSpotterToggleButton(
+    isActive: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val borderColor = if (isActive) Color(0xFFE53935) else Color(0x66DDA01E)
+    val iconColor = if (isActive) Color(0xFFE53935) else ControlIcon
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+            .width(56.dp)
+            .shadow(6.dp, RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(16.dp))
+            .background(ControlBg)
+            .border(BorderStroke(1.5.dp, borderColor), RoundedCornerShape(16.dp))
+            .clickable(
+                role = androidx.compose.ui.semantics.Role.Button,
+                onClickLabel = if (isActive) "إيقاف راصد الشبكة" else "تفعيل راصد الشبكة",
+                onClick = onClick
+            )
+            .padding(vertical = 8.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(if (isActive) Color(0xFFE53935) else Color(0x66DDA01E))
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "راصد",
+            fontSize = 9.sp,
+            maxLines = 1,
+            softWrap = false,
+            fontWeight = FontWeight.Bold,
+            color = iconColor
+        )
+        Text(
+            text = "الشبكة",
+            fontSize = 9.sp,
+            maxLines = 1,
+            softWrap = false,
+            fontWeight = FontWeight.Bold,
+            color = iconColor
+        )
+    }
+}
+
+/**
  * Isolated compass leaf in dock style.
  * Uses graphicsLayer { rotationZ = -azimuthState.value } to bypass both
  * composition and layout passes: 0 recompositions at 60Hz.

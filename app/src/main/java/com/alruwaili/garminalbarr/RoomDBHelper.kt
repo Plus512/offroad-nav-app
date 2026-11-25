@@ -10,18 +10,22 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.alruwaili.garminalbarr.track.TrackDao
 import com.alruwaili.garminalbarr.track.TrackEntity
 import com.alruwaili.garminalbarr.track.TrackPointEntity
+import com.alruwaili.garminalbarr.network.SignalPointDao
+import com.alruwaili.garminalbarr.network.SignalPointEntity
 
 @Database(
     entities = [
         LocationEntity::class,
         TrackEntity::class,
-        TrackPointEntity::class
+        TrackPointEntity::class,
+        SignalPointEntity::class
     ],
-    version = 5
+    version = 6
 )
 abstract class RoomDBHelper: RoomDatabase() {
     abstract val locationDao: LocationDao
     abstract val trackDao: TrackDao
+    abstract val signalPointDao: SignalPointDao
 
     companion object {
         @Volatile
@@ -87,13 +91,28 @@ abstract class RoomDBHelper: RoomDatabase() {
             }
         }
 
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `signal_points` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `point_number` INTEGER NOT NULL,
+                        `custom_label` TEXT,
+                        `latitude` REAL NOT NULL,
+                        `longitude` REAL NOT NULL,
+                        `captured_at_millis` INTEGER NOT NULL
+                    )
+                """.trimIndent())
+            }
+        }
+
         fun getInstance(c: Context): RoomDBHelper{
             return INSTANCE ?: synchronized(this) {
 
                 val instance = Room
                     .databaseBuilder(c, RoomDBHelper::class.java,"app_database")
                     .createFromAsset("locations.db")
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
                     .addCallback(object : RoomDatabase.Callback() {
                         override fun onOpen(db: SupportSQLiteDatabase) {

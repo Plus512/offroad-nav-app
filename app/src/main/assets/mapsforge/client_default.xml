@@ -59,8 +59,11 @@
     <rule e="way" k="landuse" v="field|farm|farmland|orchard|vineyard" zoom-min="13">
         <area src="jar:patterns/farmland.svg" symbol-height="70" symbol-width="70" />
     </rule>
+    <!-- قاع/قيعان/خبرة/خباري/غدير (seasonal water-collecting playas) render via
+         natural=marsh|wetland|mud. Recolored solid blue (2026-11-25, approved option D)
+         so the shape itself clearly reads as a water-marsh feature, not green vegetation. -->
     <rule e="way" k="natural" v="marsh|wetland|mud" zoom-min="13">
-        <area fill="#88D0D9BF" stroke="#D0D9BF" stroke-width="0.1" />
+        <area fill="#995FA8D3" stroke="#1E5A8C" stroke-width="0.3" />
         <area src="jar:patterns/swamp.svg" symbol-height="40" symbol-width="40" />
     </rule>
     <rule e="way" k="natural" v="beach|sand" zoom-min="14">
@@ -74,8 +77,11 @@
         <area fill="#BBEBF7E4" stroke="#EBF7E4" stroke-width="0.1" />
         <area src="jar:patterns/grass.svg" symbol-percent="30" />
     </rule>
+    <!-- فياض (wadi/flood-channel areas) render via natural=scrub; made vivid green
+         (2026-11-25) so they stay clearly distinct from both the plain desert background
+         and the pale nature-reserve hatch pattern at every zoom level. -->
     <rule e="way" k="natural" v="scrub" zoom-min="14">
-        <area fill="#BBB7EBA4" stroke="#B7EBA4" stroke-width="0.1" />
+        <area fill="#DD00A651" stroke="#00702F" stroke-width="0.3" />
         <area src="jar:patterns/scrub.svg" symbol-percent="50" />
     </rule>
     <rule e="way" k="natural" v="fell" zoom-min="14">

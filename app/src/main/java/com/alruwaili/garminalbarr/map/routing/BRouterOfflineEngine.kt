@@ -185,6 +185,29 @@ class BRouterOfflineEngine(
         }
     }
 
+    /**
+     * العقل الصحراوي الذكي ("أقرب طريق معبّد"): يعيد المسافة بالأمتار من [point] إلى
+     * أقرب نقطة على شبكة الطرق المحلية (.rd5) الصالحة للسيارات، أو null إذا لم تتوفر
+     * بيانات طرق محمّلة لهذا النطاق على الجهاز. يعيد استخدام نفس آلية
+     * [CandidateRoadExtractor] المستخدمة داخليًا في وضع "أقصر مسار إجمالي"، دون أي
+     * اتصال إنترنت.
+     */
+    fun findNearestRoadDistanceMeters(point: LatLng): Double? {
+        val segmentDir = MapFileManager.getRoutingSegmentsDir(context)
+        if (!segmentDir.exists() || (segmentDir.listFiles()?.none { it.extension == "rd5" && it.length() > 0 } == true)) {
+            return null
+        }
+        val wayValidator = getShortestWayValidator() ?: return null
+        val candidates = CandidateRoadExtractor.findCandidates(
+            context = context,
+            queryPoint = point,
+            wayValidator = wayValidator,
+            segmentDir = segmentDir,
+            maxCandidates = 1
+        )
+        return candidates.minByOrNull { it.distanceMeters }?.distanceMeters
+    }
+
     private fun executeGlobalShortestSearch(
         origin: LatLng,
         destination: LatLng
