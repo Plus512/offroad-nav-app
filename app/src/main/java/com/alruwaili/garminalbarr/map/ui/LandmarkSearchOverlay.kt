@@ -59,6 +59,8 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import android.widget.Toast
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Navigation
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -90,6 +92,9 @@ fun LandmarkSearchOverlay(
     viewModel: LandmarkSearchViewModel,
     onResultSelected: (LocationLightweight) -> Unit,
     onDismiss: () -> Unit,
+    userLat: Double? = null,
+    userLon: Double? = null,
+    onOpenCompass: ((LocationLightweight) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val results by viewModel.results.collectAsState()
@@ -104,6 +109,9 @@ fun LandmarkSearchOverlay(
         onResultSelected = onResultSelected,
         onDismiss = onDismiss,
         onToggleFavorite = { viewModel.toggleFavorite(it) },
+        userLat = userLat,
+        userLon = userLon,
+        onOpenCompass = onOpenCompass,
         modifier = modifier
     )
 }
@@ -117,6 +125,9 @@ fun LandmarkSearchOverlay(
     onResultSelected: (LocationLightweight) -> Unit,
     onDismiss: () -> Unit,
     onToggleFavorite: ((LocationLightweight) -> Unit)? = null,
+    userLat: Double? = null,
+    userLon: Double? = null,
+    onOpenCompass: ((LocationLightweight) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -344,13 +355,16 @@ fun LandmarkSearchOverlay(
                                 ) { _, item ->
                                     SearchResultRow(
                                         location = item,
+                                        userLat = userLat,
+                                        userLon = userLon,
                                         onClick = { handleSelect(item) },
                                         onToggleFavorite = {
                                             onToggleFavorite?.invoke(item)
                                             val willBeFav = !(item.isFav ?: false)
                                             val msg = if (willBeFav) "تمت الإضافة للمفضلة" else "تمت الإزالة من المفضلة"
                                             Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                                        }
+                                        },
+                                        onOpenCompass = { onOpenCompass?.invoke(item) }
                                     )
                                     HorizontalDivider(
                                         color = DesertCardBorder.copy(alpha = 0.6f),
@@ -369,10 +383,23 @@ fun LandmarkSearchOverlay(
 @Composable
 private fun SearchResultRow(
     location: LocationLightweight,
+    userLat: Double?,
+    userLon: Double?,
     onClick: () -> Unit,
-    onToggleFavorite: () -> Unit
+    onToggleFavorite: () -> Unit,
+    onOpenCompass: () -> Unit
 ) {
     val isFav = location.isFav == true
+    // 2026-11-26: بدل الإحداثيات الرقمية تحت الاسم، تُعرض المسافة من موقع المستخدم الحالي —
+    // وبدل أيقونة دبوس GPS، سهم البوصلة نفسه المستخدم في بقية التطبيق، متجهًا نحو هذا الموقع.
+    val distanceText: String? = if (userLat != null && userLon != null && location.latitude != null && location.longitude != null) {
+        com.alruwaili.garminalbarr.map.NavigationMath.formatRemaining(
+            com.alruwaili.garminalbarr.map.NavigationMath.distanceMeters(userLat, userLon, location.latitude, location.longitude)
+        )
+    } else null
+    val bearingDeg: Float? = if (userLat != null && userLon != null && location.latitude != null && location.longitude != null) {
+        com.alruwaili.garminalbarr.map.NavigationMath.bearingDeg(userLat, userLon, location.latitude, location.longitude)
+    } else null
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -381,18 +408,28 @@ private fun SearchResultRow(
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 10.dp)
     ) {
+        // سهم البوصلة — أكبر قليلًا من الأيقونة السابقة، ومتجه نحو هذا الموقع تحديدًا؛
+        // الضغط عليه يفتح البوصلة نحو هذا الموقع (وليس الوجهة النشطة الحالية).
         Box(
             modifier = Modifier
-                .size(34.dp)
+                .size(38.dp)
                 .clip(CircleShape)
-                .background(DesertCard),
+                .background(DesertCard)
+                .clickable(onClick = onOpenCompass),
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = Icons.Default.Place,
-                contentDescription = null,
+                imageVector = Icons.Default.Navigation,
+                contentDescription = "فتح البوصلة نحو هذا الموقع",
                 tint = DesertGold,
-                modifier = Modifier.size(18.dp)
+                modifier = Modifier
+                    .size(22.dp)
+                    .graphicsLayer {
+                        // Icons.Default.Navigation مرسومة أصلاً مشيرة للأعلى (0°=شمال)، فتدويرها
+                        // مباشرة بزاوية الاتجاه (bearingDeg) يكفي لتأشر فعليًا نحو هذا الموقع —
+                        // نفس مبدأ سهم الهدف المستخدم في بقية شاشات التطبيق (TargetCompassOverlay).
+                        rotationZ = bearingDeg ?: 0f
+                    }
             )
         }
 
@@ -408,19 +445,12 @@ private fun SearchResultRow(
                 overflow = TextOverflow.Ellipsis
             )
 
-            if (location.latitude != null && location.longitude != null) {
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = String.format(
-                        Locale.US,
-                        "%.5f, %.5f",
-                        location.latitude,
-                        location.longitude
-                    ),
-                    color = DesertTextSecondary,
-                    fontSize = 11.sp
-                )
-            }
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = distanceText ?: "المسافة غير معروفة",
+                color = DesertTextSecondary,
+                fontSize = 11.sp
+            )
         }
 
         IconButton(

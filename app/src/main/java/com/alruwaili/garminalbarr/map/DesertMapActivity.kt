@@ -14,8 +14,10 @@ import com.alruwaili.garminalbarr.billing.FeatureGatekeeper
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.absolutePadding
@@ -31,6 +33,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -43,6 +46,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -90,6 +94,7 @@ import com.alruwaili.garminalbarr.desertmind.ui.DesertMindDialog
 import com.alruwaili.garminalbarr.desertmind.DesertRadarEngine
 import com.alruwaili.garminalbarr.desertmind.ui.DesertRadarRadiusDialog
 import com.alruwaili.garminalbarr.desertmind.ui.DesertRadarSweepOverlay
+import com.alruwaili.garminalbarr.desertmind.ui.DigitalAssistantScreen
 import com.alruwaili.garminalbarr.map.ui.SaveTrackDialog
 import com.alruwaili.garminalbarr.map.ui.DiscardTrackDialog
 import com.alruwaili.garminalbarr.track.RecordingStatus
@@ -98,6 +103,7 @@ import com.alruwaili.garminalbarr.track.TrackPointEntity
 import com.alruwaili.garminalbarr.track.TrackRecordingService
 import com.alruwaili.garminalbarr.track.TrackRecordingSnapshot
 import com.alruwaili.garminalbarr.track.TrackRepository
+import kotlin.math.ln
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -152,6 +158,14 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
     // "الرؤية الصحراوية X-Ray" — طبقة تحليلية (ارتفاع+انحدار) فوق الخريطة المسطحة الحالية،
     // بديلة للتظليل العادي عند التفعيل فقط.
     private val isXRayModeState = mutableStateOf(false)
+    // "الرؤية الصحراوية X-Ray" — إعادة تصميم 2026-11-26: شاشة تمثيلية متعددة المستويات
+    // (قريب/متوسط/كامل) بدل مجرد تبديل تشغيل/إيقاف على الخريطة المسطحة.
+    private val showXRayExperienceState = mutableStateOf(false)
+    // "المساعد الرقمي" — زر مستقل بين راصد الشبكة والأدوات، يفتح شاشة HUD رقمية كاملة.
+    private val showDigitalAssistantState = mutableStateOf(false)
+    // ارتفاع حقيقي من ذاكرة التخزين المؤقت لبيانات DEM (TerrainElevationLookup) — يُحسب في
+    // Dispatchers.IO عند فتح شاشة المساعد الرقمي فقط (ليس عند كل إعادة رسم)، وليس بيانات وهمية.
+    private val digitalAssistantElevationState = mutableStateOf<Double?>(null)
     private val showSaveTrackDialog = mutableStateOf(false)
     private val showDiscardTrackDialog = mutableStateOf(false)
     private val showCarRouteOptionsDialog = mutableStateOf(false)
@@ -765,6 +779,20 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
             val remainingMeters = remainingMetersState.value
             val recSnapshot = recordingSnapshotState.value
             val isSpotterActive = isNetworkSpotterActiveState.value
+            // ترتيب ثابت لعمود الأزرار الدائرية على يمين الشاشة: البوصلة (عند وجود مسار
+            // نشط فقط) ← راصد الشبكة ← المساعد الرقمي ← الأدوات. عند ظهور شريط الوجهة
+            // والمسافة أعلى الشاشة (hasRoute) يُزاح العمود بالكامل للأسفل بمقدار ثابت حتى
+            // لا يتراكب معه، ومع زر البوصلة الصغير الذي يظهر فوقه فقط في تلك الحالة.
+            val rightColumnCompassTop = 136.dp
+            val rightColumnNetworkSpotterTop = if (hasRoute) 200.dp else 48.dp
+            val rightColumnDigitalAssistantTop = if (hasRoute) 264.dp else 112.dp
+            val rightColumnToolsTop = if (hasRoute) 328.dp else 176.dp
+            // إصلاح 2026-11-26: شاشة "الرادار الصحراوي" ملء الشاشة كانت تُرسم في الشجرة قبل
+            // شريط راصد الشبكة العلوي وزر/لوحة تسجيل الأثر، فكانا يظهران فوقها (ترتيب Z في
+            // Compose يتبع ترتيب الكود، لا الظهور البصري فقط) ويغطيان شريط "ظهر حتى الآن X من
+            // Y موقعًا" وعنوان الشاشة. الإصلاح: إخفاء هذه العناصر العائمة صراحةً أثناء فتح
+            // الرادار كامل الشاشة، بدل الاعتماد على ترتيب الرسم فقط.
+            val isRadarOpen = activeDesertRadarKmState.value != null
 
             if (isManagerOpen) {
                 DownloadManagerScreen(
@@ -820,6 +848,24 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
                             },
                             onDismiss = { pendingRegion.value = null },
                             modifier = Modifier.fillMaxSize()
+                        )
+                    }
+
+                    // سكريم شفاف لإغلاق قائمة "الأدوات" عند الضغط خارجها — يُعلَن هنا، قبل
+                    // MapControlsOverlay (أزرار التكبير/التصغير ضمنها)، كي تبقى أزرار التكبير
+                    // فوقه في ترتيب الرسم فتستقبل ضغطاتها هي أولاً، بدل أن يبتلعها هذا السكريم
+                    // كما كان يحدث مع DropdownMenu/Popup القياسية (نافذة منفصلة تبتلع أول ضغطة
+                    // خارجها في أي مكان بالشاشة بصرف النظر عن ترتيب الكود) — إصلاح المهمة #150.
+                    if (showToolsMenuState.value) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clickable(
+                                    indication = null,
+                                    interactionSource = remember { MutableInteractionSource() }
+                                ) {
+                                    showToolsMenuState.value = false
+                                }
                         )
                     }
 
@@ -938,93 +984,154 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
                                 },
                                 modifier = Modifier
                                     .align(AbsoluteAlignment.TopRight)
-                                    .absolutePadding(top = 126.dp, right = 16.dp)
+                                    .absolutePadding(top = rightColumnCompassTop, right = 16.dp)
                             )
                         }
                     }
 
-                    // "راصد الشبكة" (Network Spotter) floating toggle button, top-right of the
-                    // main map screen, independent of the track-recording / routing controls.
-                    if (pickingSlotType == null) {
+                    // عمود الأزرار الدائرية الثابت على يمين الشاشة. الترتيب من الأعلى للأسفل
+                    // ثابت دائمًا: البوصلة (فوق، عند وجود مسار نشط فقط) ← راصد الشبكة ←
+                    // المساعد الرقمي ← الأدوات. عندما يظهر شريط الوجهة/المسافة أعلى الشاشة
+                    // (hasRoute)، يُزاح العمود بالكامل للأسفل كي لا يتراكب معه أو مع زر
+                    // البوصلة الصغير أعلاه؛ وإلا يبدأ العمود من أعلى الشاشة مباشرة.
+                    if (pickingSlotType == null && !isRadarOpen) {
+                        // "راصد الشبكة" (Network Spotter) floating toggle button.
                         NetworkSpotterToggleButton(
                             isActive = isSpotterActive,
                             onClick = { toggleNetworkSpotter() },
                             modifier = Modifier
                                 .align(AbsoluteAlignment.TopRight)
-                                .absolutePadding(top = 48.dp, right = 16.dp)
+                                .absolutePadding(top = rightColumnNetworkSpotterTop, right = 16.dp)
                         )
 
+                        // "المساعد الرقمي" — زر دائري مستقل بين راصد الشبكة والأدوات، يفتح
+                        // شاشة HUD رقمية كاملة الشاشة (السرعة/الاتجاه/المسافات/بوصلة رقمية/
+                        // أقرب المواقع/تحليل التضاريس).
+                        Surface(
+                            shape = CircleShape,
+                            color = Color(0xE61F1A16),
+                            border = BorderStroke(1.dp, Color(0xFFDDA01E)),
+                            shadowElevation = 6.dp,
+                            modifier = Modifier
+                                .align(AbsoluteAlignment.TopRight)
+                                .absolutePadding(top = rightColumnDigitalAssistantTop, right = 16.dp)
+                                .size(48.dp)
+                                .clickable {
+                                    FeatureGatekeeper.guardAction(this@DesertMapActivity) {
+                                        showDigitalAssistantState.value = true
+                                    }
+                                }
+                        ) {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                Icon(
+                                    imageVector = Icons.Default.Speed,
+                                    contentDescription = "المساعد الرقمي",
+                                    tint = Color(0xFFDDA01E),
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+
                         // "الأدوات" (Tools) — single floating button, directly below the
-                        // network-spotter toggle, gathering every new feature added this
+                        // المساعد الرقمي button, gathering every new feature added this
                         // session (العقل الصحراوي الذكي، الرادار الصحراوي، وما يُضاف لاحقًا)
                         // under one menu instead of a separate icon per feature, per his
                         // explicit instruction.
                         Box(
                             modifier = Modifier
                                 .align(AbsoluteAlignment.TopRight)
-                                .absolutePadding(top = 112.dp, right = 16.dp)
+                                .absolutePadding(top = rightColumnToolsTop, right = 16.dp)
                         ) {
-                            Surface(
-                                shape = CircleShape,
-                                color = Color(0xE61F1A16),
-                                border = BorderStroke(1.dp, Color(0xFFDDA01E)),
-                                shadowElevation = 6.dp,
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .clickable {
-                                        FeatureGatekeeper.guardAction(this@DesertMapActivity) {
-                                            showToolsMenuState.value = true
+                            Column(horizontalAlignment = Alignment.End) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color(0xE61F1A16),
+                                    border = BorderStroke(1.dp, Color(0xFFDDA01E)),
+                                    shadowElevation = 6.dp,
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clickable {
+                                            FeatureGatekeeper.guardAction(this@DesertMapActivity) {
+                                                showToolsMenuState.value = true
+                                            }
+                                        }
+                                ) {
+                                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                        Icon(
+                                            imageVector = Icons.Default.Build,
+                                            contentDescription = "الأدوات",
+                                            tint = Color(0xFFDDA01E),
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    }
+                                }
+
+                                // تصميم صحراوي موحّد (خلفية داكنة + نص أخضر زاهٍ + زر خروج أسفل
+                                // القائمة). لوحة يدوية (Surface عادية) بدل DropdownMenu/Popup
+                                // القياسية — إصلاح المهمة #150: Popup يفتح نافذة Android منفصلة
+                                // تبتلع أول ضغطة خارجها في كل الشاشة (حتى فوق أزرار التكبير/
+                                // التصغير البعيدة)، فكانت ضغطة واحدة تُغلق القائمة فقط دون أن
+                                // تصل أبدًا لزر +/- تحتها. هذه اللوحة عنصر Compose عادي ضمن نفس
+                                // النافذة، فلا تبتلع شيئًا خارج حدودها المرئية الفعلية.
+                                val toolsItemGreen = Color(0xFF39FF6A)
+                                if (showToolsMenuState.value) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = Color(0xFF1F1A16),
+                                        border = BorderStroke(1.dp, Color(0xFFDDA01E)),
+                                        shadowElevation = 10.dp,
+                                        modifier = Modifier.width(230.dp)
+                                    ) {
+                                        Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                                            Text(
+                                                text = "العقل الصحراوي الذكي",
+                                                color = toolsItemGreen,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        showToolsMenuState.value = false
+                                                        showDesertMindDialogState.value = true
+                                                    }
+                                                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                                            )
+                                            Text(
+                                                text = "الرادار الصحراوي",
+                                                color = toolsItemGreen,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        showToolsMenuState.value = false
+                                                        showDesertRadarPickerState.value = true
+                                                    }
+                                                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                                            )
+                                            // "الرؤية الصحراوية X-Ray" — تفتح الآن شاشة تمثيلية
+                                            // متعددة المستويات بدل مجرد تبديل تشغيل/إيقاف.
+                                            Text(
+                                                text = "الرؤية الصحراوية X-Ray",
+                                                color = toolsItemGreen,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        showToolsMenuState.value = false
+                                                        showXRayExperienceState.value = true
+                                                    }
+                                                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                                            )
+                                            androidx.compose.material3.Divider(color = Color(0xFF3D2B1F))
+                                            Text(
+                                                text = "خروج",
+                                                color = Color(0xFFDDA01E),
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable { showToolsMenuState.value = false }
+                                                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                                            )
                                         }
                                     }
-                            ) {
-                                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                                    Icon(
-                                        imageVector = Icons.Default.Build,
-                                        contentDescription = "الأدوات",
-                                        tint = Color(0xFFDDA01E),
-                                        modifier = Modifier.size(22.dp)
-                                    )
                                 }
-                            }
-
-                            DropdownMenu(
-                                expanded = showToolsMenuState.value,
-                                onDismissRequest = { showToolsMenuState.value = false }
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("العقل الصحراوي الذكي") },
-                                    onClick = {
-                                        showToolsMenuState.value = false
-                                        showDesertMindDialogState.value = true
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("الرادار الصحراوي") },
-                                    onClick = {
-                                        showToolsMenuState.value = false
-                                        showDesertRadarPickerState.value = true
-                                    }
-                                )
-                                // "الرؤية الصحراوية X-Ray" — طبقة تحليلية (ارتفاع + انحدار)
-                                // فوق الخريطة المسطحة الحالية، بديلة للتظليل العادي فقط عند
-                                // التفعيل. ليست رؤية ثلاثية الأبعاد حقيقية — هذا ما اختاره
-                                // المستخدم صراحة من بين الخيارين المعروضين عليه.
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            if (isXRayModeState.value)
-                                                "إلغاء الرؤية الصحراوية X-Ray"
-                                            else
-                                                "تفعيل الرؤية الصحراوية X-Ray"
-                                        )
-                                    },
-                                    onClick = {
-                                        showToolsMenuState.value = false
-                                        val newValue = !isXRayModeState.value
-                                        isXRayModeState.value = newValue
-                                        osmdroidFragment?.setTerrainXRayMode(newValue)
-                                    }
-                                )
                             }
                         }
                     }
@@ -1053,6 +1160,13 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
                         DesertRadarRadiusDialog(
                             onStart = { radiusKm ->
                                 showDesertRadarPickerState.value = false
+                                // يُوسِّط الخريطة الحية على موقع المستخدم أولاً كي تظهر
+                                // بشكل صحيح داخل الدائرة الرادارية المقصوصة فوقها مباشرة
+                                // (الشاشة الجديدة تعرض الخريطة الفعلية خلفها، لا خلفية مجردة).
+                                val userLocNow = osmdroidFragment?.getCurrentUserLocation()
+                                if (userLocNow != null) {
+                                    osmdroidFragment?.animateToLocation(userLocNow, 13.0, 300L)
+                                }
                                 activeDesertRadarKmState.value = radiusKm
                             },
                             onDismiss = { showDesertRadarPickerState.value = false }
@@ -1085,16 +1199,19 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
                     }
 
                     // Top-of-screen red-blink HUD: visible proof that "راصد الشبكة" is recording.
-                    NetworkSpotterHud(
-                        isActive = isSpotterActive,
-                        onStopClick = { toggleNetworkSpotter() },
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .padding(top = 10.dp, start = 16.dp, end = 16.dp)
-                    )
+                    // مخفي أثناء فتح الرادار الصحراوي كامل الشاشة كي لا يتراكب مع عنوانها.
+                    if (!isRadarOpen) {
+                        NetworkSpotterHud(
+                            isActive = isSpotterActive,
+                            onStopClick = { toggleNetworkSpotter() },
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = 10.dp, start = 16.dp, end = 16.dp)
+                        )
+                    }
 
                     // Track Recording Overlay: Trigger Pill or Live HUD
-                    if (pickingSlotType == null) {
+                    if (pickingSlotType == null && !isRadarOpen) {
                         if (recSnapshot.status == RecordingStatus.IDLE) {
                             Surface(
                                 shape = RoundedCornerShape(20.dp),
@@ -1363,10 +1480,205 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
                         )
                     }
 
+                    // "المساعد الرقمي" — شاشة HUD كاملة الشاشة فوق كل شيء آخر عند فتحها.
+                    if (showDigitalAssistantState.value) {
+                        val huLoc = osmdroidFragment?.getCurrentUserLocation()
+                        LaunchedEffect(showDigitalAssistantState.value, huLoc?.latitude, huLoc?.longitude) {
+                            if (huLoc != null) {
+                                digitalAssistantElevationState.value = withContext(Dispatchers.IO) {
+                                    TerrainElevationLookup.currentElevationMeters(
+                                        this@DesertMapActivity, huLoc.latitude, huLoc.longitude
+                                    )
+                                }
+                            } else {
+                                digitalAssistantElevationState.value = null
+                            }
+                        }
+                        val snapshot = recordingSnapshotState.value
+                        DigitalAssistantScreen(
+                            speedKmh = osmdroidFragment?.getCurrentSpeedKmh(),
+                            azimuthDeg = azimuthState.value,
+                            hasActiveRoute = hasActiveRouteState.value,
+                            destinationName = activeDestSlotState.value?.title,
+                            remainingMeters = remainingMetersState.value,
+                            isRecordingTrack = snapshot.status == RecordingStatus.RECORDING,
+                            traveledMeters = snapshot.totalDistanceMeters,
+                            elevationMeters = digitalAssistantElevationState.value,
+                            nearbyLocations = desertMindLocationsState.value,
+                            userLat = huLoc?.latitude,
+                            userLon = huLoc?.longitude,
+                            onClose = { showDigitalAssistantState.value = false },
+                            onComingSoon = {
+                                Toast.makeText(this@DesertMapActivity, "قريبًا إن شاء الله", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    }
+
+                    // "الرؤية الصحراوية X-Ray" — إعادة تصميم 2026-11-26: بدل تبديل تشغيل/
+                    // إيقاف بسيط، 3 مستويات عرض حقيقية (ليست مشهدًا ثلاثي الأبعاد — اختار هو
+                    // صراحة "طبقة تحليلية على الخريطة المسطحة الحالية" من بين الخيارات
+                    // المطروحة عليه): كل مستوى يُفعّل طبقة X-Ray الحقيقية (ارتفاع+انحدار من
+                    // DEM) ثم يحرك كاميرا الخريطة فعليًا لنطاق مقارب لحجمه المطلوب. المستويان
+                    // الأوسع يعتمدان على مسار فعلي نشط (نقطة الانطلاق/الوجهة الحقيقيتين)؛ بلا
+                    // مسار نشط يُعرض حول موقع المستخدم الحالي مع ملاحظة صادقة بذلك، لا بيانات
+                    // ملفّقة عن رحلة غير موجودة.
+                    if (showXRayExperienceState.value) {
+                        val xrUserLoc = osmdroidFragment?.getCurrentUserLocation()
+                        val xrOrigin = activeOriginSlotState.value
+                        val xrDest = activeDestSlotState.value
+                        val xrHasRoute = hasActiveRouteState.value && xrOrigin != null && xrDest != null
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color(0xE60D0905))
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .padding(horizontal = 24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "الرؤية الصحراوية X-Ray",
+                                    color = Color(0xFFD4A017),
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "طبقة تحليلية حقيقية (ارتفاع وانحدار التضاريس) فوق الخريطة المسطحة الحالية — اختر نطاق العرض:",
+                                    color = Color(0xFFF5E6C8),
+                                    fontSize = 13.sp,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(18.dp))
+
+                                // مستوى قريب: ~20 كم² حول موقع المستخدم الحالي فعليًا.
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color(0xFF2C2013),
+                                    border = BorderStroke(1.dp, Color(0xFFD4A017)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            osmdroidFragment?.setTerrainXRayMode(true)
+                                            if (xrUserLoc != null) {
+                                                osmdroidFragment?.animateToLocation(xrUserLoc, zoomForSpanKm(4.5), 500L)
+                                            }
+                                        }
+                                ) {
+                                    Column(modifier = Modifier.padding(14.dp)) {
+                                        Text("مستوى قريب", color = Color(0xFF39FF6A), fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                        Text("تضاريس محيطة بموقعك الحالي (~20 كم²)", color = Color(0xFF9E9E9E), fontSize = 11.sp)
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                // مستوى متوسط: ~100 كم² — يتمركز على منتصف المسافة بين المستخدم
+                                // والوجهة الحقيقية إن وُجد مسار نشط، وإلا حول موقعه الحالي فقط.
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color(0xFF2C2013),
+                                    border = BorderStroke(1.dp, Color(0xFFD4A017)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            osmdroidFragment?.setTerrainXRayMode(true)
+                                            val center = if (xrHasRoute && xrUserLoc != null) {
+                                                GeoPoint((xrUserLoc.latitude + xrDest!!.latitude) / 2.0, (xrUserLoc.longitude + xrDest.longitude) / 2.0)
+                                            } else xrUserLoc
+                                            if (center != null) {
+                                                osmdroidFragment?.animateToLocation(center, zoomForSpanKm(10.0), 500L)
+                                            }
+                                        }
+                                ) {
+                                    Column(modifier = Modifier.padding(14.dp)) {
+                                        Text("مستوى متوسط", color = Color(0xFF39FF6A), fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                        Text(
+                                            if (xrHasRoute) "مسار رحلتك الحالية (~100 كم²)" else "حول موقعك الحالي — لا توجد وجهة نشطة",
+                                            color = Color(0xFF9E9E9E),
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                // مستوى كامل: يحتاج فعليًا نقطتي انطلاق/وجهة حقيقيتين من مسار
+                                // نشط. بلا مسار نشط لا تُلفَّق "رحلة" وهمية — يُعرض بدلاً منها
+                                // نفس نطاق موقع المستخدم الحالي مع توضيح صريح لذلك.
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color(0xFF2C2013),
+                                    border = BorderStroke(1.dp, Color(0xFFD4A017)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            osmdroidFragment?.setTerrainXRayMode(true)
+                                            if (xrHasRoute) {
+                                                val spanKm = NavigationMath.distanceMeters(
+                                                    xrOrigin!!.latitude, xrOrigin.longitude, xrDest!!.latitude, xrDest.longitude
+                                                ) / 1000.0
+                                                val center = GeoPoint((xrOrigin.latitude + xrDest.latitude) / 2.0, (xrOrigin.longitude + xrDest.longitude) / 2.0)
+                                                osmdroidFragment?.animateToLocation(center, zoomForSpanKm(spanKm), 500L)
+                                            } else if (xrUserLoc != null) {
+                                                osmdroidFragment?.animateToLocation(xrUserLoc, zoomForSpanKm(4.5), 500L)
+                                            }
+                                        }
+                                ) {
+                                    Column(modifier = Modifier.padding(14.dp)) {
+                                        Text("مستوى كامل", color = Color(0xFF39FF6A), fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                        Text(
+                                            if (xrHasRoute) "الرحلة كاملة من الانطلاق إلى الوجهة" else "لا توجد رحلة نشطة لعرضها كاملة",
+                                            color = Color(0xFF9E9E9E),
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(20.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(20.dp),
+                                    color = Color(0xFF39FF6A),
+                                    modifier = Modifier
+                                        .clickable {
+                                            osmdroidFragment?.setTerrainXRayMode(false)
+                                            showXRayExperienceState.value = false
+                                        }
+                                ) {
+                                    Text(
+                                        text = "خروج",
+                                        color = Color.Black,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp,
+                                        modifier = Modifier.padding(horizontal = 28.dp, vertical = 10.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     // Full-screen landmark search overlay
                     if (showSearchOverlay.value) {
+                        val searchUserLoc = osmdroidFragment?.getCurrentUserLocation()
                         LandmarkSearchOverlay(
                             viewModel = searchViewModel,
+                            userLat = searchUserLoc?.latitude,
+                            userLon = searchUserLoc?.longitude,
+                            onOpenCompass = { landmark ->
+                                val lat = landmark.latitude
+                                val lon = landmark.longitude
+                                if (MapNavigationHelper.isValidLatLon(lat, lon) && searchUserLoc != null) {
+                                    FeatureGatekeeper.guardAction(this@DesertMapActivity) {
+                                        showSearchOverlay.value = false
+                                        searchViewModel.onQueryChanged("")
+                                        compassTargetState.value = CompassTarget(
+                                            slot = RouteSlot(landmark.title ?: "موقع محدد", lat!!, lon!!, isCurrentLocation = false),
+                                            userLat = searchUserLoc.latitude,
+                                            userLon = searchUserLoc.longitude
+                                        )
+                                    }
+                                }
+                            },
                             onDismiss = {
                                 showSearchOverlay.value = false
                                 searchViewModel.onQueryChanged("")
@@ -1597,6 +1909,20 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
             )
             selectedPoi.value = poi
             activeDestSlotState.value = RouteSlot(poi.name, rawLat, rawLon, isCurrentLocation = false)
+
+            // 2026-11-26: سهم الاتجاه في المفضلة/مواقعي يطلب فتح البوصلة الكاملة فورًا
+            // نحو هذا الموقع، لا مجرد تمركز الخريطة عليه. الموقع الحالي للمستخدم (إن
+            // وُجد) هو نفس المصدر الحي المستخدم في desertMindNavigateTo بالأسفل.
+            if (intent.getBooleanExtra("EXTRA_OPEN_COMPASS", false)) {
+                val origin = osmdroidFragment?.getCurrentUserLocation()
+                val originLat = origin?.latitude ?: OsmdroidMapFragment.DEFAULT_CENTER.latitude
+                val originLon = origin?.longitude ?: OsmdroidMapFragment.DEFAULT_CENTER.longitude
+                compassTargetState.value = CompassTarget(
+                    slot = RouteSlot(poi.name, rawLat, rawLon, isCurrentLocation = false),
+                    userLat = originLat,
+                    userLon = originLon
+                )
+            }
         }
     }
 
@@ -1606,6 +1932,17 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
      * point, so they share this single implementation (mirrors the existing
      * onCompassNavigation path used by [PoiBottomSheet]) instead of duplicating it.
      */
+    /**
+     * تقدير تقريبي قياسي لمستوى تكبير خريطة الويب/أوسمدرويد الذي يُظهر نطاقًا بعرض [spanKm]
+     * كم تقريبًا — يُستخدم فقط لتحريك الكاميرا بين مستويات "الرؤية الصحراوية X-Ray" الثلاثة
+     * (قريب/متوسط/كامل)؛ ليس عرضًا ثلاثي الأبعاد حقيقيًا، فقط تقريب+تمركز على الخريطة
+     * المسطحة الحالية، طبقًا لاختياره الصريح "طبقة تحليلية على الخريطة المسطحة الحالية".
+     */
+    private fun zoomForSpanKm(spanKm: Double): Double {
+        val z = 14.0 - (ln(spanKm.coerceAtLeast(0.5)) / ln(2.0))
+        return z.coerceIn(6.0, 15.0)
+    }
+
     private fun desertMindNavigateTo(lat: Double, lon: Double, title: String) {
         FeatureGatekeeper.guardAction(this@DesertMapActivity) {
             val origin = osmdroidFragment?.getCurrentUserLocation()

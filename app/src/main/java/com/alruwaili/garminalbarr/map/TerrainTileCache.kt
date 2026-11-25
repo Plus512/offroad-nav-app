@@ -1,13 +1,16 @@
 package com.alruwaili.garminalbarr.map
 
 import android.content.Context
+import android.graphics.BitmapFactory
 import org.json.JSONObject
 import java.io.File
+import kotlin.math.atan
 import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sinh
 import kotlin.math.tan
 
 /**
@@ -119,5 +122,53 @@ object TerrainTileCache {
             tileFile(context, t[0], t[1], t[2]).delete()
         }
         deleteManifest(context, regionId)
+    }
+}
+
+/**
+ * قراءة ارتفاع نقطة واحدة (موقع المستخدم الحالي غالبًا) من بلاطة ارتفاع Terrarium محفوظة محلياً
+ * عند أدق تكبير متاح ([TerrainTileCache.MAX_ZOOM] = 10)، لعرضها في لوحة "تحليل التضاريس" ضمن
+ * شاشة "المساعد الرقمي". تُعيد null إن لم تكن بلاطة التضاريس لتلك المنطقة محمَّلة أصلاً (لا تخمين
+ * بلا بيانات). نفس صيغة فك الترميز الموثَّقة والمستخدمة فعلياً في [OsmdroidTerrainOverlay]
+ * (height = R*256 + G + B/256 - 32768)، وموضع البكسل داخل البلاطة بتقريب خطي بسيط بين حدودها —
+ * كافٍ لعرض رقم تقريبي واحد، وليس حسابًا مساحيًا دقيقًا.
+ */
+object TerrainElevationLookup {
+    private fun tileLonEdge(x: Int, z: Int): Double = x.toDouble() / (1 shl z) * 360.0 - 180.0
+    private fun tileLatEdge(y: Int, z: Int): Double {
+        val n = Math.PI - 2.0 * Math.PI * y.toDouble() / (1 shl z)
+        return Math.toDegrees(atan(sinh(n)))
+    }
+
+    fun currentElevationMeters(context: Context, lat: Double, lon: Double): Double? {
+        val z = TerrainTileCache.MAX_ZOOM
+        val x = TerrainTileCache.tileX(lon, z)
+        val y = TerrainTileCache.tileY(lat, z)
+        val file = TerrainTileCache.tileFile(context, z, x, y)
+        if (!file.exists() || file.length() == 0L) return null
+        val bmp = try {
+            BitmapFactory.decodeFile(file.absolutePath)
+        } catch (e: Exception) {
+            null
+        } ?: return null
+        return try {
+            val w = bmp.width
+            val h = bmp.height
+            val lonWest = tileLonEdge(x, z)
+            val lonEast = tileLonEdge(x + 1, z)
+            val latNorth = tileLatEdge(y, z)
+            val latSouth = tileLatEdge(y + 1, z)
+            val px = (((lon - lonWest) / (lonEast - lonWest)) * w).toInt().coerceIn(0, w - 1)
+            val py = (((latNorth - lat) / (latNorth - latSouth)) * h).toInt().coerceIn(0, h - 1)
+            val pixel = bmp.getPixel(px, py)
+            val r = (pixel shr 16) and 0xFF
+            val g = (pixel shr 8) and 0xFF
+            val b = pixel and 0xFF
+            (r * 256 + g + b / 256.0) - 32768.0
+        } catch (e: Exception) {
+            null
+        } finally {
+            bmp.recycle()
+        }
     }
 }

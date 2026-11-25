@@ -19,7 +19,7 @@
         android:layout_height="wrap_content"
         android:text="@string/empty_favorites"
         android:textSize="16sp"
-        android:textColor="#888888"
+        android:textColor="#FFC9BFB4"
         android:gravity="center"
         android:visibility="gone"
         app:layout_constraintBottom_toBottomOf="parent"

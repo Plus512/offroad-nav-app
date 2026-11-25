@@ -7,6 +7,7 @@
     android:layout_height="wrap_content"
     xmlns:app="http://schemas.android.com/tools"
     android:layout_margin="8dp"
+    card_view:cardBackgroundColor="#1F1A16"
     card_view:cardCornerRadius="15dp"
     card_view:cardElevation="16dp"
     app:ignore="NamespaceTypo">
@@ -16,25 +17,24 @@
         android:layout_height="wrap_content"
         android:layoutDirection="rtl"
         android:orientation="horizontal"
-        android:background="#A0876A"
-        android:padding="12dp">
+        android:background="#1F1A16"
+        android:padding="12dp"
+        android:gravity="center_vertical">
 
         <!-- أيقونة القلب على اليمين -->
         <ImageView
             android:id="@+id/favoriteIcon"
-            android:layout_width="45dp"
-            android:layout_height="45dp"
-            android:layout_marginHorizontal="16dp"
-            android:layout_alignParentEnd="true"
-            android:layout_centerVertical="true"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="12dp"
             android:src="@drawable/favorite_border"
-            app:tint="@color/black" />
+            app:tint="#FFDDA01E" />
 
-        <!-- الاسم والمسافة بالترتيب عمودي على اليسار -->
+        <!-- الاسم والمسافة بالترتيب عمودي -->
         <LinearLayout
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_toStartOf="@id/favoriteIcon"
+            android:layout_weight="1"
             android:orientation="vertical">
 
             <TextView
@@ -42,8 +42,8 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="اسم الموقع"
-                android:textSize="24dp"
-                android:textColor="@color/black"
+                android:textSize="18sp"
+                android:textColor="#FF39FF6A"
                 android:textStyle="bold"
                 android:maxLines="1"
                 android:ellipsize="end"/>
@@ -53,12 +53,23 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="428.089 كم"
-                android:textSize="20sp"
-                android:textColor="@color/dark_gray"
+                android:textSize="14sp"
+                android:textColor="#FFC9BFB4"
                 android:layout_marginTop="2dp"
                 android:maxLines="1"
                 android:ellipsize="end" />
         </LinearLayout>
+
+        <!-- سهم الاتجاه: يفتح البوصلة الكاملة نحو هذا الموقع، مدوَّر بزاوية الاتجاه
+             الحقيقية المحسوبة من موقع المستخدم الحالي -->
+        <ImageView
+            android:id="@+id/compassArrow"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:layout_marginStart="10dp"
+            android:padding="4dp"
+            android:src="@drawable/ic_navigation_arrow"
+            android:contentDescription="فتح البوصلة نحو هذا الموقع" />
 
     </LinearLayout>
 

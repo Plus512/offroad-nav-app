@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
@@ -111,6 +112,7 @@ fun MyLocationsScreen(
     onShareLocation: (LocationEntity) -> Unit,
     onDeleteLocalOnly: (LocationEntity) -> Unit,
     onDeleteBoth: (LocationEntity) -> Unit,
+    onOpenCompass: (LocationEntity) -> Unit = {},
     onAddLocation: (title: String, lat: Double, lon: Double) -> Unit,
     onRestoreFromCloud: () -> Unit,
     tracks: List<TrackEntity> = emptyList(),
@@ -330,13 +332,26 @@ fun MyLocationsScreen(
                                     "جاري تحديد المسافة…"
                                 }
 
+                                // اتجاه حقيقي محسوب من موقع المستخدم الحالي الفعلي (لا بيانات وهمية)؛
+                                // بلا موقع حالي معروف يبقى السهم بلا زاوية (null) فلا يُرسم مُدوَّرًا باتجاه خاطئ.
+                                val bearingDeg = if (currentLocation != null && item.latitude != null && item.longitude != null) {
+                                    NavigationMath.bearingDeg(
+                                        currentLocation.latitude,
+                                        currentLocation.longitude,
+                                        item.latitude,
+                                        item.longitude
+                                    )
+                                } else null
+
                                 LocationCard(
                                     location = item,
                                     distanceText = distanceText,
+                                    bearingDeg = bearingDeg,
                                     onCardClick = { onLocationClick(item) },
                                     onFavoriteToggle = { onFavoriteToggle(item) },
                                     onShare = { onShareLocation(item) },
-                                    onDelete = { locationPendingDelete = item }
+                                    onDelete = { locationPendingDelete = item },
+                                    onOpenCompass = { onOpenCompass(item) }
                                 )
                             }
                             // Bottom spacing for FAB
@@ -642,10 +657,12 @@ fun MyLocationsScreen(
 private fun LocationCard(
     location: LocationEntity,
     distanceText: String,
+    bearingDeg: Float? = null,
     onCardClick: () -> Unit,
     onFavoriteToggle: () -> Unit,
     onShare: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onOpenCompass: () -> Unit = {}
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -715,8 +732,19 @@ private fun LocationCard(
                 )
             }
 
-            // Actions: Favorite + Overflow Menu
+            // Actions: Compass Arrow + Favorite + Overflow Menu
             Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onOpenCompass) {
+                    Icon(
+                        imageVector = Icons.Default.Navigation,
+                        contentDescription = "فتح البوصلة نحو هذا الموقع",
+                        tint = Color(0xFF39FF6A),
+                        modifier = Modifier
+                            .size(20.dp)
+                            .rotate(bearingDeg ?: 0f)
+                    )
+                }
+
                 IconButton(onClick = onFavoriteToggle) {
                     Icon(
                         imageVector = if (location.isFav == true) Icons.Default.Favorite else Icons.Default.FavoriteBorder,

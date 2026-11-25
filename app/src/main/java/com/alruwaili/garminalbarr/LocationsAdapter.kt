@@ -9,7 +9,8 @@ import com.alruwaili.garminalbarr.databinding.ItemLocationBinding
 
 class LocationsAdapter(
     private val onFavoriteClick: (LocationLightweight) -> Unit,
-    private val onItemClick: (LocationLightweight) -> Unit
+    private val onItemClick: (LocationLightweight) -> Unit,
+    private val onCompassClick: (LocationLightweight) -> Unit
 ) : ListAdapter<LocationLightweight, LocationsAdapter.LocationViewHolder>(DiffCallback) {
 
     private var userLat: Double? = null
@@ -38,12 +39,14 @@ class LocationsAdapter(
                 0.0
             }
             binding.distanceText.text = String.format(java.util.Locale.US, "المسافة: %.2f كم", distanceKm)
+            bindCompassRotation(uLat, uLon, lat, lon)
 
             binding.favoriteIcon.setImageResource(
                 if (location.isFav == true) R.drawable.favred else R.drawable.favorite_border
             )
             binding.favoriteIcon.setOnClickListener { onFavoriteClick(location) }
             binding.root.setOnClickListener { onItemClick(location) }
+            binding.compassArrow.setOnClickListener { onCompassClick(location) }
         }
 
         fun updateDistanceOnly(location: LocationLightweight) {
@@ -57,6 +60,22 @@ class LocationsAdapter(
                 0.0
             }
             binding.distanceText.text = String.format(java.util.Locale.US, "المسافة: %.2f كم", distanceKm)
+            bindCompassRotation(uLat, uLon, lat, lon)
+        }
+
+        /**
+         * يدوّر سهم الاتجاه بزاوية الاتجاه (bearing) الحقيقية من موقع المستخدم الحالي
+         * إلى هذا الموقع — بيانات فعلية محسوبة، وليست زخرفية. بلا موقع حالي، يبقى
+         * السهم ثابتًا للأعلى (0°) إلى حين توفر إحداثيات حقيقية.
+         */
+        private fun bindCompassRotation(uLat: Double?, uLon: Double?, lat: Double, lon: Double) {
+            binding.compassArrow.rotation = if (uLat != null && uLon != null) {
+                val results = FloatArray(2)
+                android.location.Location.distanceBetween(uLat, uLon, lat, lon, results)
+                results[1]
+            } else {
+                0f
+            }
         }
     }
 

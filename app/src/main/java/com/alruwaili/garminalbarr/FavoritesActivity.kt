@@ -30,10 +30,24 @@ class FavoritesActivity : AppCompatActivity() {
         viewModel = ViewModelProvider(this).get(LocationViewModel::class.java)
         val app = application as MyApplication
         sharedLocationViewModel = app.sharedLocationViewModel
+        // إصلاح 2026-11-26: هذه الشاشة كانت تكتفي بمراقبة sharedLocationViewModel.currentLocation
+        // دون أن تطلب تحديثه بنفسها إطلاقًا — فإن لم تكن شاشة "مواقعي" قد فُتحت أولاً في نفس
+        // جلسة التطبيق (وهي الشاشة الوحيدة التي كانت تستدعي startLocationUpdates/refreshLocation)
+        // تبقى القيمة فارغة أو عالقة على آخر قراءة قديمة/غير دقيقة، فتظهر مسافات غير منطقية
+        // إطلاقًا (مثل 1155 كم) بدل المسافة الفعلية. نفس الاستدعاء المستخدم فعليًا وبنجاح في
+        // MyLocationsActivity، كي تطلب هذه الشاشة أيضًا موقعًا حيًا بنفسها بدل الاعتماد على شاشة
+        // أخرى قد لا تكون فُتحت أصلاً.
+        sharedLocationViewModel.startLocationUpdates(this)
+        sharedLocationViewModel.refreshLocation(this)
 
         adapter = LocationsAdapter(
             onFavoriteClick = { location -> toggleFavorite(location) },
-            onItemClick = { location -> showOptionsDialog(location) }
+            onItemClick = { location -> showOptionsDialog(location) },
+            onCompassClick = { location ->
+                FeatureGatekeeper.guardAction(this) {
+                    openCompassTo(location)
+                }
+            }
         )
         sharedLocationViewModel.currentLocation.observe(this) { location ->
             if (location != null) {
@@ -119,6 +133,17 @@ class FavoritesActivity : AppCompatActivity() {
             return
         }
         MapNavigationHelper.goToDesertMap(this, lat!!, lon!!, location.title)
+        finish()
+    }
+
+    private fun openCompassTo(location: LocationLightweight) {
+        val lat = location.latitude
+        val lon = location.longitude
+        if (!MapNavigationHelper.isValidLatLon(lat, lon)) {
+            Toast.makeText(this, "إحداثيات غير صالحة", Toast.LENGTH_SHORT).show()
+            return
+        }
+        MapNavigationHelper.goToDesertMap(this, lat!!, lon!!, location.title, openCompass = true)
         finish()
     }
 

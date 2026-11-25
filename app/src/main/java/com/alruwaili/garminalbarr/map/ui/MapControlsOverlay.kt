@@ -2,7 +2,10 @@ package com.alruwaili.garminalbarr.map.ui
 
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -355,8 +358,21 @@ fun NetworkSpotterToggleButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val borderColor = if (isActive) Color(0xFFE53935) else Color(0x66DDA01E)
-    val iconColor = if (isActive) Color(0xFFE53935) else ControlIcon
+    // وميض مستمر عندما تكون الخدمة نشطة فعلاً — إشارة بصرية حية أن "راصد الشبكة" يعمل
+    // ويسجل، بدل بقاء الزر ثابت الشكل بلا أي مؤشر حركي (طلب المستخدم 2026-11-26).
+    val blinkTransition = rememberInfiniteTransition(label = "networkSpotterBlink")
+    val blinkAlpha by blinkTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.25f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 650, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "networkSpotterBlinkAlpha"
+    )
+    val liveAlpha = if (isActive) blinkAlpha else 1f
+    val borderColor = (if (isActive) Color(0xFFE53935) else Color(0x66DDA01E)).copy(alpha = liveAlpha.coerceIn(0.35f, 1f))
+    val iconColor = (if (isActive) Color(0xFFE53935) else ControlIcon).copy(alpha = if (isActive) liveAlpha else 1f)
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -365,7 +381,7 @@ fun NetworkSpotterToggleButton(
             .shadow(6.dp, RoundedCornerShape(16.dp))
             .clip(RoundedCornerShape(16.dp))
             .background(ControlBg)
-            .border(BorderStroke(1.5.dp, borderColor), RoundedCornerShape(16.dp))
+            .border(BorderStroke(if (isActive) 2.dp else 1.5.dp, borderColor), RoundedCornerShape(16.dp))
             .clickable(
                 role = androidx.compose.ui.semantics.Role.Button,
                 onClickLabel = if (isActive) "إيقاف راصد الشبكة" else "تفعيل راصد الشبكة",
@@ -377,7 +393,7 @@ fun NetworkSpotterToggleButton(
             modifier = Modifier
                 .size(10.dp)
                 .clip(CircleShape)
-                .background(if (isActive) Color(0xFFE53935) else Color(0x66DDA01E))
+                .background((if (isActive) Color(0xFFE53935) else Color(0x66DDA01E)).copy(alpha = liveAlpha))
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(

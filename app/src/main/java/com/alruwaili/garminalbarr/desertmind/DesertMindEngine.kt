@@ -63,16 +63,20 @@ object DesertMindEngine {
         allLocations: List<LocationLightweight>
     ): DesertMindAnswer {
         val nearest = nearestLocation(currentLat, currentLon, allLocations, categories = null)
-        val coordsLine = "الإحداثيات: %.5f، %.5f".format(currentLat, currentLon)
+        // 2026-11-26: بطلب المستخدم — الإجابة المباشرة والبارزة هي اسم أقرب مكان معروف
+        // ("بالقرب من <الاسم>")، وليست الإحداثيات الرقمية؛ الإحداثيات تبقى متوفرة كمعلومة
+        // ثانوية فقط في آخر السطر لمن يحتاجها تحديداً، لا في صدارة الجواب.
+        val coordsLine = "(الإحداثيات: %.5f، %.5f)".format(currentLat, currentLon)
         if (nearest == null) {
-            return DesertMindAnswer(text = "$coordsLine\nلا توجد نقاط محفوظة قريبة لتحديد المكان نسبةً إليها.")
+            return DesertMindAnswer(text = "لا توجد نقاط محفوظة قريبة لتحديد مكانك نسبةً إليها.\n$coordsLine")
         }
         val dist = NavigationMath.distanceMeters(currentLat, currentLon, nearest.first.latitude!!, nearest.first.longitude!!)
         val dir = NavigationMath.arabicDirection(
             NavigationMath.bearingDeg(currentLat, currentLon, nearest.first.latitude!!, nearest.first.longitude!!)
         )
+        val placeName = nearest.first.title ?: "بدون اسم"
         return DesertMindAnswer(
-            text = "$coordsLine\nأقرب نقطة معروفة: ${nearest.first.title ?: "بدون اسم"}، على بعد ${NavigationMath.formatRemaining(dist)} باتجاه $dir.",
+            text = "بالقرب من $placeName (على بعد ${NavigationMath.formatRemaining(dist)} باتجاه $dir).\n$coordsLine",
             targetLat = nearest.first.latitude,
             targetLon = nearest.first.longitude,
             targetTitle = nearest.first.title
@@ -296,8 +300,12 @@ object DesertMindEngine {
      * [com.alruwaili.garminalbarr.map.OsmdroidPoiOverlay.classifyPoi] (duplicated here
      * rather than shared, so this new feature cannot change the POI map's own labels
      * or risk breaking its already-verified behavior).
+     *
+     * عامة (public) منذ 2026-11-26 كي تُعاد استخدامها لاختيار أيقونة ملونة بحسب نوع الموقع
+     * في شاشات "الرادار الصحراوي" و"المواقع القريبة" ضمن "المساعد الرقمي" — بدل تكرار نفس
+     * قواعد البادئة الحرفية مرة أخرى في كل شاشة.
      */
-    private fun classifyPoiTitle(title: String): String {
+    fun classifyPoiTitle(title: String): String {
         if (title.startsWith("جبل")) return "mountain"
         if (title.startsWith("بئر")) return "well"
         if (title.startsWith("وادي")) return "valley"

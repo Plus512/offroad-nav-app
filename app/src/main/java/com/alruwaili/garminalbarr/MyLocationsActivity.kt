@@ -23,13 +23,17 @@ import kotlinx.coroutines.withContext
 import com.alruwaili.garminalbarr.track.GpxExporter
 import com.alruwaili.garminalbarr.track.TrackEntity
 import com.alruwaili.garminalbarr.track.TrackRepository
+import com.alruwaili.garminalbarr.network.SignalPointEntity
+import com.alruwaili.garminalbarr.network.SignalPointRepository
 
 class MyLocationsActivity : ComponentActivity() {
 
     private lateinit var sharedLocationViewModel: SharedLocationViewModel
     private val trackRepository by lazy { TrackRepository(this) }
+    private val signalPointRepository by lazy { SignalPointRepository(this) }
     private val locationsState = mutableStateOf<List<LocationEntity>>(emptyList())
     private val tracksState = mutableStateOf<List<TrackEntity>>(emptyList())
+    private val signalPointsState = mutableStateOf<List<SignalPointEntity>>(emptyList())
     private val currentLocationState = mutableStateOf<LocationData?>(null)
     private val isRestoringState = mutableStateOf(false)
 
@@ -53,6 +57,12 @@ class MyLocationsActivity : ComponentActivity() {
             }
         }
 
+        lifecycleScope.launch {
+            signalPointRepository.allSignalPoints.collect { list ->
+                signalPointsState.value = list
+            }
+        }
+
         val initialTab = if (intent.getBooleanExtra("open_tracks_tab", false)) 1 else 0
 
         setContent {
@@ -66,6 +76,7 @@ class MyLocationsActivity : ComponentActivity() {
                 onShareLocation = { location -> shareLocation(location) },
                 onDeleteLocalOnly = { location -> deleteLocationLocalOnly(location) },
                 onDeleteBoth = { location -> deleteLocationBoth(location) },
+                onOpenCompass = { location -> openCompassTo(location) },
                 onAddLocation = { title, lat, lon -> addLocation(title, lat, lon) },
                 onRestoreFromCloud = { restoreFromCloud() },
                 tracks = tracksState.value,
@@ -74,8 +85,32 @@ class MyLocationsActivity : ComponentActivity() {
                 onToggleTrackVisibility = { track -> toggleTrackVisibility(track) },
                 onBacktrack = { track -> backtrackOnTrack(track) },
                 onExportGpx = { track -> exportGpx(track) },
-                onDeleteTrack = { track -> deleteTrack(track) }
+                onDeleteTrack = { track -> deleteTrack(track) },
+                signalPoints = signalPointsState.value,
+                onSignalPointGoTo = { point -> navigateToSignalPoint(point) },
+                onSignalPointRename = { point, label -> renameSignalPoint(point, label) },
+                onSignalPointDelete = { point -> deleteSignalPoint(point) }
             )
+        }
+    }
+
+    private fun navigateToSignalPoint(point: SignalPointEntity) {
+        FeatureGatekeeper.guardAction(this) {
+            MapNavigationHelper.goToDesertMap(this, point.latitude, point.longitude, point.displayName)
+            finish()
+        }
+    }
+
+    private fun renameSignalPoint(point: SignalPointEntity, label: String?) {
+        lifecycleScope.launch {
+            signalPointRepository.rename(point.id, label)
+        }
+    }
+
+    private fun deleteSignalPoint(point: SignalPointEntity) {
+        lifecycleScope.launch {
+            signalPointRepository.delete(point)
+            Toast.makeText(this@MyLocationsActivity, "تم حذف نقطة الشبكة", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -144,6 +179,19 @@ class MyLocationsActivity : ComponentActivity() {
         }
         FeatureGatekeeper.guardAction(this) {
             MapNavigationHelper.goToDesertMap(this, lat!!, lon!!, location.title)
+            finish()
+        }
+    }
+
+    private fun openCompassTo(location: LocationEntity) {
+        val lat = location.latitude
+        val lon = location.longitude
+        if (!MapNavigationHelper.isValidLatLon(lat, lon)) {
+            Toast.makeText(this, "إحداثيات غير صالحة", Toast.LENGTH_SHORT).show()
+            return
+        }
+        FeatureGatekeeper.guardAction(this) {
+            MapNavigationHelper.goToDesertMap(this, lat!!, lon!!, location.title, openCompass = true)
             finish()
         }
     }

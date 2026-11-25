@@ -238,8 +238,6 @@ private fun CompassDial(
                         strokeWidth = if (isCardinal) 4.dp.toPx() else 2.dp.toPx()
                     )
                 }
-                drawCardinalLabels(measurer, center, r * 0.64f)
-
                 // Target needle inside the dial: rotates by bearing (targetBearing) relative to dial North.
                 // Net screen angle: targetBearing - phoneAzimuth.
                 rotate(bearing, pivot = center) {
@@ -257,31 +255,58 @@ private fun CompassDial(
                 }
             }
 
+            // ملاحظة إصلاح 2026-11-26: سابقاً كانت كلمات الاتجاه (شمال/جنوب/شرق/غرب) تُرسم
+            // داخل كتلة rotate(-az, pivot=مركز القرص) أعلاه، ثم تحاول "إلغاء" ذلك الدوران محليًا
+            // بتدوير مضاد (rotate(+az, pivot=مركز_الكلمة)) حول نقطة ارتكاز مختلفة. تركيب دورانين
+            // متضادين حول نقطتي ارتكاز مختلفتين لا يُلغي بعضه فعليًا، بل ينتج "دوران صافٍ = صفر"
+            // مع "إزاحة/انزياح موضع" (translation) غير مرغوبة تتناسب مع المسافة بين نقطتي
+            // الارتكاز، فتبدو الكلمات وكأنها "تهتز/تتشقلب" حول القرص بدل أن تثبت بصريًا في
+            // موضعها الصحيح. الإصلاح: حساب موضع كل كلمة مباشرة على الشاشة هنا (خارج أي rotate
+            // موروث تمامًا) بالاعتماد على az فقط لتحديد موضعها حول القرص، ثم رسمها بزاوية صفر
+            // مطلقة — فتتحرك الكلمات حول القرص مع دوران الهاتف دون أن تنقلب أو تهتز إطلاقًا.
+            drawCardinalLabelsFixed(measurer, center, r * 0.64f, az)
+
             drawCircle(color = Color.White, radius = r * 0.055f, center = center)
             drawCircle(color = CompassGold, radius = r * 0.028f, center = center)
         }
     }
 }
 
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCardinalLabels(
+/**
+ * يرسم كلمات الاتجاه (شمال/شرق/جنوب/غرب) بموضع محسوب مباشرة على الشاشة، خارج أي كتلة
+ * rotate() موروثة من الوردة الخارجية — راجع ملاحظة 2026-11-26 في [CompassDial] أعلاه لشرح
+ * سبب استبدال هذا بالأسلوب القديم (rotate متداخل بنقطتي ارتكاز مختلفتين).
+ */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCardinalLabelsFixed(
     measurer: TextMeasurer,
     center: Offset,
-    radius: Float
+    radius: Float,
+    azimuth: Float
 ) {
     val labels = listOf("شمال" to 0, "شرق" to 90, "جنوب" to 180, "غرب" to 270)
     for ((text, deg) in labels) {
-        val rad = Math.toRadians(deg.toDouble())
+        // الزاوية الفعلية على الشاشة = زاوية الكلمة الأصلية ناقص اتجاه الهاتف — نفس الزاوية
+        // التي كانت تظهر بها علامات التدريج (ticks) المرسومة داخل rotate(-az,...)، لكن محسوبة
+        // هنا مباشرة بدل الاعتماد على تحويل الرسم.
+        val screenDeg = deg - azimuth
+        val rad = Math.toRadians(screenDeg.toDouble())
         val style = androidx.compose.ui.text.TextStyle(
             color = if (deg == 0) CompassGold else CompassTextPrimary,
             fontSize = 20.sp,
             fontWeight = FontWeight.Bold
         )
         val layout = measurer.measure(text, style)
+        val labelCenter = Offset(
+            center.x + (radius * sin(rad)).toFloat(),
+            center.y - (radius * cos(rad)).toFloat()
+        )
+        // بزاوية صفر مطلقة تمامًا — لا rotate() إطلاقًا هنا، فلا يمكن لحروف الكلمة أن تنقلب
+        // أو تهتز بصرف النظر عن دوران الهاتف؛ فقط موضعها حول القرص يتحرك (labelCenter أعلاه).
         drawText(
             textLayoutResult = layout,
             topLeft = Offset(
-                center.x + (radius * sin(rad)).toFloat() - layout.size.width / 2f,
-                center.y - (radius * cos(rad)).toFloat() - layout.size.height / 2f
+                labelCenter.x - layout.size.width / 2f,
+                labelCenter.y - layout.size.height / 2f
             )
         )
     }

@@ -10,10 +10,14 @@
     <color name="dark_neutral_gray">#4D4D4D</color>       <!-- رمادي داكن محايد -->
     <color name="light_beige_bg">#F8F8F4</color>          <!-- بيج فاتح للخلفية -->
     <color name="favorite_pink">#E75480</color>
-    <color name="dialog_background">#BCAAA4</color>  <!-- بني غامق كخلفية -->
-    <color name="dialog_title_color"> #3E2723</color> <!-- بني فاتح واضح للعنوان -->
-    <color name="dialog_item_text"> #3E2723</color>   <!-- بني فاتح للنصوص -->
-    <color name="dialog_negative_text">#2F2727</color> <!-- بني متوسط لزر الإلغاء -->
+    <!-- 2026-11-26: استُبدلت الخلفية البيجية المسطحة والنص البني الباهت (الشكل "البدائي" الذي
+         اعترض عليه المستخدم) بنفس الطابع الصحراوي الداكن + الأخضر الزاهي المستخدم في شاشات
+         Compose الأخرى هذه الجلسة (راصد الشبكة، الفياض)، توحيدًا للتصميم عبر كل قوائم/حوارات
+         التطبيق دفعة واحدة كما طلب، بدل كل شاشة على حدة. -->
+    <color name="dialog_background">#F21F1A16</color>  <!-- صحراوي داكن شبه معتم -->
+    <color name="dialog_title_color">#FF39FF6A</color> <!-- أخضر زاهٍ -->
+    <color name="dialog_item_text">#FF39FF6A</color>   <!-- أخضر زاهٍ -->
+    <color name="dialog_negative_text">#FFDDA01E</color> <!-- ذهبي صحراوي لزر الإلغاء/الخروج -->
 
     <!-- VIP Activation Screen -->
     <color name="vip_green">#2E7D32</color>

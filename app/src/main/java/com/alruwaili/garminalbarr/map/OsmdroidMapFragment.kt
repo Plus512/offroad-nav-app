@@ -595,6 +595,13 @@ class OsmdroidMapFragment : Fragment() {
         return null
     }
 
+    /** السرعة الحالية بالكيلومتر/الساعة من آخر قراءة GPS، أو null إن لم تتضمّن القراءة سرعة بعد. */
+    fun getCurrentSpeedKmh(): Float? {
+        val loc = latestLocation ?: return null
+        if (!loc.hasSpeed()) return null
+        return loc.speed * 3.6f
+    }
+
     // ======================== Route Navigation & Persistence ========================
 
     /**

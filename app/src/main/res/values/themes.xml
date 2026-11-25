@@ -36,11 +36,16 @@
         <item name="cornerSize">50%</item>
     </style>
 
-    <style name="CustomAlertDialogTheme" parent="Theme.AppCompat.Light.Dialog.Alert">
+    <!-- 2026-11-26: طابع صحراوي موحد (خلفية داكنة + نص أخضر زاهٍ + زر إلغاء/خروج ذهبي)، بدل
+         الخلفية البيجية المسطحة السابقة — تطبيق موحد على كل حوار يستخدم هذا الـstyle (قائمة
+         خيارات عنصر المفضلة حاليًا)، كما طلب المستخدم. -->
+    <style name="CustomAlertDialogTheme" parent="Theme.AppCompat.Dialog.Alert">
         <item name="android:background">@color/dialog_background</item>
         <item name="android:textColorPrimary">@color/dialog_title_color</item>
         <item name="android:listMenuViewStyle">@style/CustomAlertDialogList</item>
         <item name="android:textSize">@dimen/text_size_22sp</item> <!-- حجم أكبر للعنوان والنصوص -->
+        <item name="colorAccent">@color/dialog_negative_text</item>
+        <item name="android:windowBackground">@color/dialog_background</item>
     </style>
 
     <style name="CustomAlertDialogList" parent="Widget.AppCompat.ListView">
