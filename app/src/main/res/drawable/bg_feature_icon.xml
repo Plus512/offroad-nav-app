@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="oval">
-    <!-- Light brown transparent background (15% opacity of #5B4630) -->
-    <solid android:color="#265B4630"/>
-</shape>
