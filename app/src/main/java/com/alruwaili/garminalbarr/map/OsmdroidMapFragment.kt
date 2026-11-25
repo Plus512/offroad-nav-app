@@ -107,6 +107,7 @@ class OsmdroidMapFragment : Fragment() {
     private var poiOverlay: OsmdroidPoiOverlay? = null
     private var routeOverlay: OsmdroidRouteOverlay? = null
     private var trackOverlay: OsmdroidTrackOverlay? = null
+    private var terrainOverlay: OsmdroidTerrainOverlay? = null
     private var rotationOverlay: RotationGestureOverlay? = null
     var interactionListener: OnMapInteractionListener? = null
     private var lastDetectedRegion: MapRegion? = null
@@ -193,6 +194,12 @@ class OsmdroidMapFragment : Fragment() {
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
         }
         this.mapView = mapView
+
+        // 0. Terrain hillshade overlay — drawn first so every other overlay (location, POIs,
+        // route, track markers) paints on top of it, never underneath.
+        val terrainOv = OsmdroidTerrainOverlay(requireContext().applicationContext)
+        terrainOverlay = terrainOv
+        mapView.overlays.add(terrainOv)
 
         // 1. High-performance SmoothLocationOverlay (VSync-gated rotation + FusedLocation).
         // applicationContext: overlay can outlive the Activity on config change.
@@ -1002,6 +1009,12 @@ class OsmdroidMapFragment : Fragment() {
     fun refreshTileSource(mapView: MapView? = this.mapView) {
         val mv = mapView ?: return
         OfflineMapEngine.refreshAfterDownload(requireContext(), mv)
+    }
+
+    /** يُستدعى بعد اكتمال تنزيل بلاطات تضاريس جديدة، كي تُعاد قراءتها من القرص بدل الاعتماد على ذاكرة قديمة. */
+    fun refreshTerrainOverlay() {
+        terrainOverlay?.invalidateCache()
+        mapView?.invalidate()
     }
 
     private fun detectRegion() {

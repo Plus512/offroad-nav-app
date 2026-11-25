@@ -22,14 +22,4 @@
     <color name="input_bg_gray">#E0E0E0</color>
     <color name="pending_text_gray">#757575</color>
 
-    <!-- ألوان شاشة دليل البر القديمة (MainActivity/SettingsActivity/SavedItemsActivity - legacymap) -->
-    <color name="sand_bg">#C9A66B</color>
-    <color name="desert_brown">#5C3A21</color>
-    <color name="neon_bg">#0A0F0A</color>
-    <color name="neon_card_bg">#10231B</color>
-    <color name="neon_border_teal">#1FBFAE</color>
-    <color name="neon_green">#39FF6A</color>
-    <color name="neon_green_bright">#52FF7A</color>
-    <color name="neon_green_dim">#2BB84F</color>
-
 </resources>

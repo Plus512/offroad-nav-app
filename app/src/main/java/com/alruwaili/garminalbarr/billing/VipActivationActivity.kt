@@ -294,7 +294,7 @@ class VipActivationActivity : AppCompatActivity() {
                     ).show()
                     listenerRegistration?.remove()
                     listenerRegistration = null
-                    startActivity(Intent(this@VipActivationActivity, com.alruwaili.garminalbarr.legacymap.MainActivity::class.java))
+                    startActivity(Intent(this@VipActivationActivity, com.alruwaili.garminalbarr.map.DesertMapActivity::class.java))
                     finish()
                 }
             },

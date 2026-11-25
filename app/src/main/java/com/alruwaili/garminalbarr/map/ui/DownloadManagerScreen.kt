@@ -68,12 +68,17 @@ fun DownloadManagerScreen(
     downloadProgress: Map<String, Float>,
     routingStates: Map<String, DownloadState> = emptyMap(),
     routingProgress: Map<String, Float> = emptyMap(),
+    terrainStates: Map<String, DownloadState> = emptyMap(),
+    terrainProgress: Map<String, Float> = emptyMap(),
     storageUsedBytes: Long,
     routingStorageUsedBytes: Long = 0L,
+    terrainStorageUsedBytes: Long = 0L,
     onDownload: (MapRegion) -> Unit,
     onDelete: (MapRegion) -> Unit,
     onDownloadRouting: (MapRegion) -> Unit = {},
     onDeleteRouting: (MapRegion) -> Unit = {},
+    onDownloadTerrain: (MapRegion) -> Unit = {},
+    onDeleteTerrain: (MapRegion) -> Unit = {},
     onBack: () -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -127,20 +132,20 @@ fun DownloadManagerScreen(
                             color = DesertTan
                         )
                         Text(
-                            text = "الخرائط: ${RegionRegistry.formatSize(storageUsedBytes)} | المسارات: ${RegionRegistry.formatSize(routingStorageUsedBytes)}",
+                            text = "الخريطة: ${RegionRegistry.formatSize(storageUsedBytes)} | التضاريس: ${RegionRegistry.formatSize(terrainStorageUsedBytes)} | مسار السيارة: ${RegionRegistry.formatSize(routingStorageUsedBytes)}",
                             fontSize = 11.sp,
                             color = Color(0xFF8B6914)
                         )
                     }
                     Text(
-                        text = RegionRegistry.formatSize(storageUsedBytes + routingStorageUsedBytes),
+                        text = RegionRegistry.formatSize(storageUsedBytes + routingStorageUsedBytes + terrainStorageUsedBytes),
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = DesertGold
                     )
                 }
 
-                // 2-Tab Segmented Control
+                // 3-Tab Segmented Control: خريطة عادية / تضاريس / مسار السيارة
                 TabRow(
                     selectedTabIndex = selectedTab,
                     containerColor = DesertBrown,
@@ -158,7 +163,7 @@ fun DownloadManagerScreen(
                         onClick = { selectedTab = 0 },
                         text = {
                             Text(
-                                text = "الخرائط المرئية (.map)",
+                                text = "خريطة عادية",
                                 fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Normal,
                                 color = if (selectedTab == 0) DesertGold else DesertTan,
                                 fontSize = 13.sp
@@ -170,9 +175,21 @@ fun DownloadManagerScreen(
                         onClick = { selectedTab = 1 },
                         text = {
                             Text(
-                                text = "بيانات مسار السيارة (.rd5)",
+                                text = "تضاريس",
                                 fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Normal,
                                 color = if (selectedTab == 1) DesertGold else DesertTan,
+                                fontSize = 13.sp
+                            )
+                        }
+                    )
+                    Tab(
+                        selected = selectedTab == 2,
+                        onClick = { selectedTab = 2 },
+                        text = {
+                            Text(
+                                text = "مسار السيارة",
+                                fontWeight = if (selectedTab == 2) FontWeight.Bold else FontWeight.Normal,
+                                color = if (selectedTab == 2) DesertGold else DesertTan,
                                 fontSize = 13.sp
                             )
                         }
@@ -188,8 +205,8 @@ fun DownloadManagerScreen(
                         .padding(horizontal = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    if (selectedTab == 0) {
-                        items(regions, key = { "map_${it.id}" }) { region ->
+                    when (selectedTab) {
+                        0 -> items(regions, key = { "map_${it.id}" }) { region ->
                             RegionCard(
                                 titleAr = region.nameAr,
                                 subtitle = "${region.nameEn} • ${RegionRegistry.formatSize(region.sizeBytes)}",
@@ -200,8 +217,18 @@ fun DownloadManagerScreen(
                                 onDelete = { onDelete(region) }
                             )
                         }
-                    } else {
-                        items(regions, key = { "routing_${it.id}" }) { region ->
+                        1 -> items(regions, key = { "terrain_${it.id}" }) { region ->
+                            RegionCard(
+                                titleAr = region.nameAr,
+                                subtitle = "${region.nameEn} • بلاطات ارتفاع (تظليل التضاريس)",
+                                badgeText = null,
+                                state = terrainStates[region.id] ?: DownloadState.NOT_DOWNLOADED,
+                                progress = terrainProgress[region.id] ?: 0f,
+                                onDownload = { onDownloadTerrain(region) },
+                                onDelete = { onDeleteTerrain(region) }
+                            )
+                        }
+                        else -> items(regions, key = { "routing_${it.id}" }) { region ->
                             val segCount = region.routingSegments.size
                             val badge = when (region.id) {
                                 "bahrain" -> "يشترك مع قطر والسعودية"

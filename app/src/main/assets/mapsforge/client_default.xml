@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<rendertheme xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" map-background="#ECD9A6"
-    map-background-outside="#D8BE7A" version="5" xmlns="http://mapsforge.org/renderTheme"
+<rendertheme xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" map-background="#D9C49A"
+    map-background-outside="#BEAC87" version="5" xmlns="http://mapsforge.org/renderTheme"
     xsi:schemaLocation="http://mapsforge.org/renderTheme https://raw.githubusercontent.com/mapsforge/mapsforge/master/resources/renderTheme.xsd">
 
     <rule e="way" k="natural" v="issea|sea">
-        <area fill="#9FC7E8" />
+        <area fill="#5FA8D3" />
     </rule>
 
     <rule e="way" k="natural" v="nosea">
-        <area fill="#ECD9A6" stroke="#ECD9A6" stroke-width="1.0" />
+        <area fill="#D9C49A" stroke="#D9C49A" stroke-width="1.0" />
     </rule>
 
     <rule e="way" k="natural" v="land">
-        <area fill="#BBF8F8F8" stroke="#ECD9A6" stroke-width="0.1" />
+        <area fill="#BBF8F8F8" stroke="#D9C49A" stroke-width="0.1" />
     </rule>
 
     <!-- landuse -->
@@ -182,24 +182,24 @@
             </rule>
         </rule>
         <rule e="way" k="waterway" v="ditch">
-            <line stroke="#9FC7E8" stroke-width="0.6" />
+            <line stroke="#5FA8D3" stroke-width="0.6" />
         </rule>
         <rule e="way" k="waterway" v="drain">
             <line stroke="#B0B0B0" stroke-linecap="butt" stroke-width="0.7" />
-            <line stroke="#9FC7E8" stroke-linecap="butt" stroke-width="0.5" />
+            <line stroke="#5FA8D3" stroke-linecap="butt" stroke-width="0.5" />
         </rule>
         <rule e="way" k="waterway" v="canal">
             <line stroke="#B0B0B0" stroke-linecap="butt" stroke-width="1.1" />
-            <line stroke="#9FC7E8" stroke-linecap="butt" stroke-width="0.9" />
+            <line stroke="#5FA8D3" stroke-linecap="butt" stroke-width="0.9" />
         </rule>
         <rule e="way" k="waterway" v="stream">
-            <line stroke="#9FC7E8" stroke-width="0.6" />
+            <line stroke="#5FA8D3" stroke-width="0.6" />
         </rule>
         <rule e="way" k="waterway" v="river">
-            <line stroke="#9FC7E8" stroke-width="1.1" />
+            <line stroke="#5FA8D3" stroke-width="1.1" />
         </rule>
         <rule e="way" k="waterway" v="riverbank">
-            <area fill="#9FC7E8" />
+            <area fill="#5FA8D3" />
         </rule>
         <rule e="way" k="waterway" v="river" zoom-min="12">
             <pathText display="always" fill="#6C96E6" font-size="14" font-style="bold" k="name"
@@ -210,7 +210,7 @@
                 priority="-100" stroke="#FFFFFF" stroke-width="2.0" />
         </rule>
         <rule e="way" k="natural|landuse" v="water|reservoir|basin">
-            <area fill="#9FC7E8" />
+            <area fill="#5FA8D3" />
             <rule e="any" k="*" v="*" zoom-min="14">
                 <caption display="always" fill="#6C96E6" font-size="12" k="name" priority="-100"
                     stroke="#FFFFFF" stroke-width="2.0" />
@@ -257,7 +257,7 @@
         </rule>
     </rule>
     <rule closed="yes" e="way" k="amenity" v="fountain">
-        <area fill="#9FC7E8" stroke="#000080" stroke-width="0.15" />
+        <area fill="#5FA8D3" stroke="#000080" stroke-width="0.15" />
     </rule>
 
     <!-- leisure -->
@@ -275,7 +275,7 @@
         <area fill="#D3EBD9" stroke="#6FC13D" stroke-width="0.2" />
     </rule>
     <rule e="way" k="leisure|amenity" v="swimming_pool">
-        <area fill="#9FC7E8" stroke="#000080" stroke-width="0.15" />
+        <area fill="#5FA8D3" stroke="#000080" stroke-width="0.15" />
     </rule>
     <rule e="way" k="sport|leisure" v="swimming|water_park" zoom-min="15">
         <line stroke="#806060FF" stroke-width="0.3" />
@@ -381,7 +381,7 @@
         </rule>
         <rule e="way" k="lock" v="yes|true" zoom-min="14">
             <line stroke="#333333" stroke-linecap="square" stroke-width="2.0" />
-            <line stroke="#9FC7E8" stroke-linecap="butt" stroke-width="1.6" />
+            <line stroke="#5FA8D3" stroke-linecap="butt" stroke-width="1.6" />
         </rule>
         <rule e="way" k="waterway" v="weir" zoom-min="14">
             <line stroke="#333333" stroke-width="0.7" />

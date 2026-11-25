@@ -139,8 +139,11 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
     private val downloadProgress = mutableStateMapOf<String, Float>()
     private val routingStates = mutableStateMapOf<String, DownloadState>()
     private val routingProgress = mutableStateMapOf<String, Float>()
+    private val terrainStates = mutableStateMapOf<String, DownloadState>()
+    private val terrainProgress = mutableStateMapOf<String, Float>()
     private val storageUsedBytes = mutableStateOf(0L)
     private val routingStorageUsedBytes = mutableStateOf(0L)
+    private val terrainStorageUsedBytes = mutableStateOf(0L)
     private val downloadTitleState = mutableStateOf<String?>(null)
     private val pendingRegion = mutableStateOf<MapRegion?>(null)
     private val selectedPoi = mutableStateOf<PoiDetails?>(null)
@@ -347,6 +350,43 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
             routingStates[region.id] = DownloadState.NOT_DOWNLOADED
             routingStorageUsedBytes.value = MapFileManager.getRoutingStorageUsedBytes(this)
             Toast.makeText(this, "تم حذف مسارات ${region.nameAr}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun startTerrainDownload(region: MapRegion) {
+        if (terrainStates[region.id] == DownloadState.DOWNLOADING) return
+
+        lifecycleScope.launch {
+            terrainStates[region.id] = DownloadState.DOWNLOADING
+            terrainProgress[region.id] = 0f
+
+            val result = downloadService.downloadTerrainRegion(this@DesertMapActivity, region) { progress ->
+                terrainProgress[region.id] = progress
+            }
+
+            result.fold(
+                onSuccess = {
+                    terrainStates[region.id] = DownloadState.DOWNLOADED
+                    terrainProgress.remove(region.id)
+                    terrainStorageUsedBytes.value = MapFileManager.getTerrainStorageUsedBytes(this@DesertMapActivity)
+                    osmdroidFragment?.refreshTerrainOverlay()
+                    Toast.makeText(this@DesertMapActivity, "تم تحميل تضاريس ${region.nameAr}", Toast.LENGTH_SHORT).show()
+                },
+                onFailure = { e ->
+                    terrainStates[region.id] = DownloadState.NOT_DOWNLOADED
+                    terrainProgress.remove(region.id)
+                    Toast.makeText(this@DesertMapActivity, "فشل تحميل التضاريس: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            )
+        }
+    }
+
+    private fun deleteTerrain(region: MapRegion) {
+        if (MapFileManager.deleteTerrainRegion(this, region.id)) {
+            terrainStates[region.id] = DownloadState.NOT_DOWNLOADED
+            terrainStorageUsedBytes.value = MapFileManager.getTerrainStorageUsedBytes(this)
+            osmdroidFragment?.refreshTerrainOverlay()
+            Toast.makeText(this, "تم حذف تضاريس ${region.nameAr}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -621,9 +661,15 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
             } else {
                 routingStates[region.id] = DownloadState.NOT_DOWNLOADED
             }
+            if (MapFileManager.isTerrainDownloaded(this, region.id)) {
+                terrainStates[region.id] = DownloadState.DOWNLOADED
+            } else {
+                terrainStates[region.id] = DownloadState.NOT_DOWNLOADED
+            }
         }
         storageUsedBytes.value = MapFileManager.getStorageUsedBytes(this)
         routingStorageUsedBytes.value = MapFileManager.getRoutingStorageUsedBytes(this)
+        terrainStorageUsedBytes.value = MapFileManager.getTerrainStorageUsedBytes(this)
 
         // Initialize active route state from persistence
         syncActiveRouteFromPersistence()
@@ -682,12 +728,17 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
                     downloadProgress = downloadProgress.toMap(),
                     routingStates = routingStates.toMap(),
                     routingProgress = routingProgress.toMap(),
+                    terrainStates = terrainStates.toMap(),
+                    terrainProgress = terrainProgress.toMap(),
                     storageUsedBytes = storageUsedBytes.value,
                     routingStorageUsedBytes = routingStorageUsedBytes.value,
+                    terrainStorageUsedBytes = terrainStorageUsedBytes.value,
                     onDownload = { startDownload(it) },
                     onDelete = { deleteRegion(it) },
                     onDownloadRouting = { startRoutingDownload(it) },
                     onDeleteRouting = { deleteRouting(it) },
+                    onDownloadTerrain = { startTerrainDownload(it) },
+                    onDeleteTerrain = { deleteTerrain(it) },
                     onBack = { showDownloadManager.value = false }
                 )
             } else {

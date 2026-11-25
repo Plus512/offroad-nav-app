@@ -8,6 +8,11 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import com.alruwaili.garminalbarr.map.MapFileManager
+import com.alruwaili.garminalbarr.map.TerrainTileCache
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
@@ -21,13 +26,19 @@ class TileDownloadService {
         private const val READ_TIMEOUT = 30_000
         private const val MAX_RETRIES = 3
 
+        // مصدر بلاطات ارتفاع التضاريس: مصدر AWS Terrarium العام الموثَّق (s3.amazonaws.com)،
+        // نفس المصدر بالضبط المستخدم سابقاً في دليل البر لتبويب "تضاريس" — رابط عام معروف، وليس تخميناً.
+        private const val TERRAIN_URL_FMT = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/%d/%d/%d.png"
+        private const val TERRAIN_PARALLEL_DOWNLOADS = 4
+
         private fun isTrustedDownloadHost(host: String): Boolean {
             return host.endsWith("web.app") ||
                     host.endsWith("googleapis.com") ||
                     host == "aldalilah-tiles.web.app" ||
                     host == "brouter.de" ||
                     host.endsWith("github.com") ||
-                    host.endsWith("githubusercontent.com")
+                    host.endsWith("githubusercontent.com") ||
+                    host == "s3.amazonaws.com"
         }
     }
 
@@ -171,6 +182,87 @@ class TileDownloadService {
         }
         onProgress(1f)
         Result.success(Unit)
+    }
+
+    /**
+     * يحمّل بلاطات ارتفاع التضاريس (AWS Terrarium) لكامل حدود [region] ضمن
+     * [TerrainTileCache.MIN_ZOOM]..[TerrainTileCache.MAX_ZOOM]، ويحفظها عبر [TerrainTileCache].
+     * بلاطات محفوظة مسبقاً (تتشارك مع دولة أخرى محمَّلة) لا تُعاد تنزيلها. فشل بلاطة واحدة
+     * (ازدحام خادم أو شبكة ضعيفة) لا يُسقط التحميل كله — يُسجَّل في البيان كتغطية جزئية فقط،
+     * ولا تُخمَّن بيانات البلاطة الفاشلة.
+     */
+    suspend fun downloadTerrainRegion(
+        context: Context,
+        region: MapRegion,
+        onProgress: (Float) -> Unit
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val b = region.boundingBox
+        val tiles = TerrainTileCache.tilesForBounds(b.south, b.west, b.north, b.east)
+        if (tiles.isEmpty()) {
+            onProgress(1f)
+            TerrainTileCache.writeManifest(context, region.id, tiles, 0)
+            return@withContext Result.success(Unit)
+        }
+
+        val semaphore = Semaphore(TERRAIN_PARALLEL_DOWNLOADS)
+        var completed = 0
+        var failures = 0
+        val lock = Any()
+
+        val jobs = tiles.map { t ->
+            async {
+                currentCoroutineContext().ensureActive()
+                semaphore.withPermit {
+                    val ok = fetchTerrainTile(context, t[0], t[1], t[2])
+                    synchronized(lock) {
+                        completed++
+                        if (!ok) failures++
+                        onProgress((completed.toFloat() / tiles.size).coerceIn(0f, 1f))
+                    }
+                }
+            }
+        }
+        jobs.awaitAll()
+
+        TerrainTileCache.writeManifest(context, region.id, tiles, failures)
+        if (failures == tiles.size) {
+            Result.failure(Exception("تعذّر جلب أي بلاطة تضاريس (فشلت كل البلاطات: $failures)"))
+        } else {
+            Result.success(Unit)
+        }
+    }
+
+    /** يجلب بلاطة تضاريس واحدة (أو يتأكد من وجودها محفوظة مسبقاً). 404 يعني لا ارتفاع هنا (بحر غالباً) وليس فشلاً. */
+    private fun fetchTerrainTile(context: Context, z: Int, x: Int, y: Int): Boolean {
+        val f = TerrainTileCache.tileFile(context, z, x, y)
+        if (f.exists() && f.length() > 0) return true
+
+        repeat(2) {
+            try {
+                val url = URL(String.format(TERRAIN_URL_FMT, z, x, y))
+                require(isTrustedDownloadHost(url.host)) { "Untrusted host: ${url.host}" }
+                val connection = url.openConnection() as HttpURLConnection
+                try {
+                    connection.connectTimeout = CONNECT_TIMEOUT
+                    connection.readTimeout = READ_TIMEOUT
+                    when (connection.responseCode) {
+                        200 -> {
+                            val bytes = connection.inputStream.use { it.readBytes() }
+                            val tmp = File(f.parentFile, "${f.name}.tmp")
+                            FileOutputStream(tmp).use { it.write(bytes) }
+                            if (f.exists()) f.delete()
+                            if (tmp.renameTo(f)) return true
+                        }
+                        404 -> return true // لا بلاطة ارتفاع هنا (خارج اليابسة غالباً)؛ ليس فشلاً
+                    }
+                } finally {
+                    connection.disconnect()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Terrain tile $z/$x/$y attempt failed", e)
+            }
+        }
+        return false
     }
 
     private suspend fun downloadFile(

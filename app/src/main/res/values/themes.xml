@@ -54,53 +54,5 @@
         <item name="android:textStyle">bold</item> <!-- نفس اللون اللي عندك -->
     </style>
 
-    <!-- ********** ثيمات شاشة دليل البر القديمة (legacymap.MainActivity/SettingsActivity) ********** -->
-    <style name="Theme.DalilAlBar" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <item name="colorPrimary">@color/desert_brown</item>
-        <item name="colorPrimaryVariant">@color/desert_brown</item>
-        <item name="colorOnPrimary">@color/white</item>
-        <item name="colorSecondary">@color/sand_bg</item>
-        <item name="android:statusBarColor" tools:targetApi="21">@color/desert_brown</item>
-    </style>
-
-    <style name="Theme.DalilAlBar.NeonDialog" parent="Theme.MaterialComponents.DayNight.Dialog.Alert">
-        <item name="colorPrimary">@color/neon_green</item>
-        <item name="colorOnPrimary">@color/neon_bg</item>
-        <item name="colorSurface">@color/neon_card_bg</item>
-        <item name="colorOnSurface">@color/neon_green</item>
-        <item name="android:textColorPrimary">@color/neon_green</item>
-        <item name="android:textColorSecondary">@color/neon_green_dim</item>
-        <item name="android:background">@color/neon_card_bg</item>
-        <item name="buttonBarPositiveButtonStyle">@style/Widget.DalilAlBar.NeonDialogButton</item>
-        <item name="buttonBarNegativeButtonStyle">@style/Widget.DalilAlBar.NeonDialogButton</item>
-        <item name="buttonBarNeutralButtonStyle">@style/Widget.DalilAlBar.NeonDialogButton</item>
-        <item name="android:textColorAlertDialogListItem">@color/neon_green</item>
-        <item name="android:buttonBarPositiveButtonStyle">@style/Widget.DalilAlBar.NeonDialogButton.Framework</item>
-        <item name="android:buttonBarNegativeButtonStyle">@style/Widget.DalilAlBar.NeonDialogButton.Framework</item>
-        <item name="android:buttonBarNeutralButtonStyle">@style/Widget.DalilAlBar.NeonDialogButton.Framework</item>
-    </style>
-
-    <style name="Widget.DalilAlBar.NeonDialogButton" parent="Widget.MaterialComponents.Button.TextButton">
-        <item name="android:textColor">@color/neon_green_bright</item>
-        <item name="fontFamily">monospace</item>
-        <item name="android:textStyle">bold</item>
-    </style>
-
-    <style name="Widget.DalilAlBar.NeonDialogButton.Framework" parent="@android:style/Widget.Holo.Button.Borderless.Small">
-        <item name="android:textColor">@color/neon_green_bright</item>
-        <item name="android:fontFamily">monospace</item>
-        <item name="android:textStyle">bold</item>
-    </style>
-
-    <style name="TextAppearance.DalilAlBar.NeonDigital" parent="@android:style/TextAppearance">
-        <item name="android:fontFamily">monospace</item>
-        <item name="android:textStyle">bold</item>
-        <item name="android:textColor">@color/neon_green</item>
-        <item name="android:letterSpacing">0.03</item>
-        <item name="android:shadowColor">#8039FF6A</item>
-        <item name="android:shadowRadius">6</item>
-        <item name="android:shadowDx">0</item>
-        <item name="android:shadowDy">0</item>
-    </style>
 
 </resources>

@@ -38,22 +38,6 @@
         <activity
             android:name=".map.DesertMapActivity"
             android:exported="false" />
-        <!-- شاشة دليل البر القديمة (MapLibre) — الشاشة الرئيسية بعد الترحيب/التجربة -->
-        <activity
-            android:name=".legacymap.MainActivity"
-            android:exported="false"
-            android:theme="@style/Theme.DalilAlBar"
-            android:screenOrientation="portrait" />
-        <activity
-            android:name=".legacymap.SettingsActivity"
-            android:exported="false"
-            android:theme="@style/Theme.DalilAlBar"
-            android:screenOrientation="portrait" />
-        <activity
-            android:name=".legacymap.SavedItemsActivity"
-            android:exported="false"
-            android:theme="@style/Theme.DalilAlBar"
-            android:screenOrientation="portrait" />
         <activity
             android:name=".FavoritesActivity"
             android:exported="false" />

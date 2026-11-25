@@ -129,8 +129,4 @@ dependencies {
     implementation("com.google.firebase:firebase-analytics")
     // App Set ID API
     implementation("com.google.android.gms:play-services-appset:16.1.0")
-
-    // محرك عرض الخريطة القديم لدليل البر (legacymap.MainActivity) — خرائط متجهة من OpenFreeMap
-    implementation("org.maplibre.gl:android-sdk:13.6.1")
-    implementation("org.maplibre.gl:android-plugin-scalebar-v9:3.0.2")
 }

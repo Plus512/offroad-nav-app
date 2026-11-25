@@ -231,6 +231,37 @@ object MapFileManager {
         return deleteCountryRouting(context, region)
     }
 
+    // ======================== Terrain (Hillshade) Data Management ========================
+
+    fun isTerrainDownloaded(context: Context, regionId: String): Boolean =
+        TerrainTileCache.isRegionCached(context, regionId)
+
+    fun getTerrainStorageUsedBytes(context: Context): Long =
+        TerrainTileCache.totalCachedSizeBytes(context)
+
+    /**
+     * Deletes region's cached terrain tiles, preserving tiles still needed by another
+     * region whose terrain is currently installed (same sharing logic as [deleteCountryRouting]).
+     */
+    fun deleteTerrainRegion(context: Context, region: MapRegion): Boolean {
+        val otherBounds = RegionRegistry.ALL_REGIONS
+            .filter { it.id != region.id && isTerrainDownloaded(context, it.id) }
+            .map { doubleArrayOf(it.boundingBox.south, it.boundingBox.west, it.boundingBox.north, it.boundingBox.east) }
+        val b = region.boundingBox
+        TerrainTileCache.deleteRegionTiles(
+            context,
+            region.id,
+            doubleArrayOf(b.south, b.west, b.north, b.east),
+            otherBounds
+        )
+        return true
+    }
+
+    fun deleteTerrainRegion(context: Context, regionId: String): Boolean {
+        val region = RegionRegistry.getRegionById(regionId) ?: return false
+        return deleteTerrainRegion(context, region)
+    }
+
     private fun isWithinTolerance(actual: Long, expected: Long, tolerancePercent: Double = 0.05): Boolean {
         if (expected == 0L) return actual == 0L
         val diff = kotlin.math.abs(actual - expected)
