@@ -166,7 +166,18 @@ class SettingsActivity : AppCompatActivity() {
 
         val actionBtn = Button(this, null, 0, R.style.Widget_DalilAlBar_NeonDialogButton).apply {
             text = if (isDownloaded) getString(R.string.delete) else getString(R.string.action_download)
-            setOnClickListener { if (isDownloaded) onDeleteClick() else onDownloadClick() }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                // سطر تشخيص مؤقت (سيُحذف بعد تحديد سبب عدم عمل التحميل): يؤكد وصول الضغطة فعلاً
+                // لمستمع الزر نفسه قبل أي منطق آخر، كي نعرف أين بالضبط ينقطع التنفيذ.
+                Toast.makeText(
+                    this@SettingsActivity,
+                    "[تشخيص] ضُغِط: ${def.arabicName} — ${if (isDownloaded) "حذف" else "تحميل"} — تبويب $activeTab",
+                    Toast.LENGTH_SHORT
+                ).show()
+                if (isDownloaded) onDeleteClick() else onDownloadClick()
+            }
         }
 
         card.addView(textColumn)
@@ -177,6 +188,7 @@ class SettingsActivity : AppCompatActivity() {
     // ---------- تبويب "خريطة" (بلاطات MapLibre) ----------
 
     private fun startMapTileDownload(def: OfflineRegionDef) {
+      try {
         val dialogView = layoutInflater.inflate(R.layout.dialog_download_progress, null)
         val tvName = dialogView.findViewById<TextView>(R.id.tvDownloadRegionName)
         val progressBar = dialogView.findViewById<ProgressBar>(R.id.progressBarDownload)
@@ -244,6 +256,9 @@ class SettingsActivity : AppCompatActivity() {
                 }
             }
         )
+      } catch (e: Exception) {
+          Toast.makeText(this, "[تشخيص] استثناء في startMapTileDownload: ${e.javaClass.simpleName}: ${e.message}", Toast.LENGTH_LONG).show()
+      }
     }
 
     private fun deleteMapTile(def: OfflineRegionDef, region: OfflineRegion) {
@@ -280,60 +295,66 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun startTerrainDownload(def: OfflineRegionDef) {
-        val dialogView = layoutInflater.inflate(R.layout.dialog_download_progress, null)
-        val tvName = dialogView.findViewById<TextView>(R.id.tvDownloadRegionName)
-        val progressBar = dialogView.findViewById<ProgressBar>(R.id.progressBarDownload)
-        val tvPercent = dialogView.findViewById<TextView>(R.id.tvDownloadPercent)
-        val btnPause = dialogView.findViewById<Button>(R.id.btnDownloadPause)
-        val btnCancel = dialogView.findViewById<Button>(R.id.btnDownloadCancel)
-        val btnBackground = dialogView.findViewById<Button>(R.id.btnDownloadBackground)
-        tvName.text = "تضاريس: ${def.arabicName}"
-        btnPause.visibility = View.GONE // لا يوجد استئناف جزئي حقيقي لهذا المسار، كما في طرق السيارة
+        // تشخيص مؤقت: لف الدالة كلها بـ try/catch كي تظهر أي استثناء كرسالة واضحة بدل أن يختفي
+        // بصمت (أو يتسبب بتوقف غير مُفسَّر). سيُحذف هذا بعد تحديد سبب "لا شيء يعمل أبداً".
+        try {
+            val dialogView = layoutInflater.inflate(R.layout.dialog_download_progress, null)
+            val tvName = dialogView.findViewById<TextView>(R.id.tvDownloadRegionName)
+            val progressBar = dialogView.findViewById<ProgressBar>(R.id.progressBarDownload)
+            val tvPercent = dialogView.findViewById<TextView>(R.id.tvDownloadPercent)
+            val btnPause = dialogView.findViewById<Button>(R.id.btnDownloadPause)
+            val btnCancel = dialogView.findViewById<Button>(R.id.btnDownloadCancel)
+            val btnBackground = dialogView.findViewById<Button>(R.id.btnDownloadBackground)
+            tvName.text = "تضاريس: ${def.arabicName}"
+            btnPause.visibility = View.GONE // لا يوجد استئناف جزئي حقيقي لهذا المسار، كما في طرق السيارة
 
-        var cancelled = false
-        val dialog = AlertDialog.Builder(this, R.style.Theme_DalilAlBar_NeonDialog)
-            .setView(dialogView)
-            .setCancelable(false)
-            .create()
-        btnCancel.setOnClickListener {
-            // كما في تحميل طرق السيارة: لا يوقف اتصالات الشبكة الجارية فعلياً فوراً، فقط يُخفي
-            // الواجهة ويتجاهل نتيجتها — صدقاً دون ادّعاء إلغاء شبكي فوري غير موجود فعلاً.
-            cancelled = true
-            dialog.dismiss()
-            renderCards()
-        }
-        btnBackground.setOnClickListener { dialog.dismiss() }
-        dialog.show()
-
-        offlineController.downloadTerrain(
-            def,
-            object : OfflineRegionsController.TerrainProgressListener {
-                override fun onProgress(d: OfflineRegionDef, percent: Int) {
-                    if (cancelled) return
-                    progressBar.progress = percent
-                    tvPercent.text = "$percent%"
-                }
-
-                override fun onComplete(d: OfflineRegionDef, failedTiles: Int, totalTiles: Int) {
-                    if (cancelled) return
-                    if (dialog.isShowing) dialog.dismiss()
-                    val msg = if (failedTiles > 0) {
-                        "تم حفظ تضاريس ${d.arabicName} جزئياً (فشلت $failedTiles من $totalTiles بلاطة — بعض البقع ستعتمد على الإنترنت المباشر)"
-                    } else {
-                        "تم حفظ تضاريس ${d.arabicName} كاملة دون انترنت"
-                    }
-                    Toast.makeText(this@SettingsActivity, msg, Toast.LENGTH_LONG).show()
-                    renderCards()
-                }
-
-                override fun onDownloadError(d: OfflineRegionDef, message: String) {
-                    if (cancelled) return
-                    if (dialog.isShowing) dialog.dismiss()
-                    Toast.makeText(this@SettingsActivity, message, Toast.LENGTH_LONG).show()
-                    renderCards()
-                }
+            var cancelled = false
+            val dialog = AlertDialog.Builder(this, R.style.Theme_DalilAlBar_NeonDialog)
+                .setView(dialogView)
+                .setCancelable(false)
+                .create()
+            btnCancel.setOnClickListener {
+                // كما في تحميل طرق السيارة: لا يوقف اتصالات الشبكة الجارية فعلياً فوراً، فقط يُخفي
+                // الواجهة ويتجاهل نتيجتها — صدقاً دون ادّعاء إلغاء شبكي فوري غير موجود فعلاً.
+                cancelled = true
+                dialog.dismiss()
+                renderCards()
             }
-        )
+            btnBackground.setOnClickListener { dialog.dismiss() }
+            dialog.show()
+
+            offlineController.downloadTerrain(
+                def,
+                object : OfflineRegionsController.TerrainProgressListener {
+                    override fun onProgress(d: OfflineRegionDef, percent: Int) {
+                        if (cancelled) return
+                        progressBar.progress = percent
+                        tvPercent.text = "$percent%"
+                    }
+
+                    override fun onComplete(d: OfflineRegionDef, failedTiles: Int, totalTiles: Int) {
+                        if (cancelled) return
+                        if (dialog.isShowing) dialog.dismiss()
+                        val msg = if (failedTiles > 0) {
+                            "تم حفظ تضاريس ${d.arabicName} جزئياً (فشلت $failedTiles من $totalTiles بلاطة — بعض البقع ستعتمد على الإنترنت المباشر)"
+                        } else {
+                            "تم حفظ تضاريس ${d.arabicName} كاملة دون انترنت"
+                        }
+                        Toast.makeText(this@SettingsActivity, msg, Toast.LENGTH_LONG).show()
+                        renderCards()
+                    }
+
+                    override fun onDownloadError(d: OfflineRegionDef, message: String) {
+                        if (cancelled) return
+                        if (dialog.isShowing) dialog.dismiss()
+                        Toast.makeText(this@SettingsActivity, message, Toast.LENGTH_LONG).show()
+                        renderCards()
+                    }
+                }
+            )
+        } catch (e: Exception) {
+            Toast.makeText(this, "[تشخيص] استثناء في startTerrainDownload: ${e.javaClass.simpleName}: ${e.message}", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun deleteTerrainCache(def: OfflineRegionDef) {
@@ -347,6 +368,7 @@ class SettingsActivity : AppCompatActivity() {
     // ---------- تبويب "طرق (سيارة)" (بيانات Overpass المحفوظة محلياً) ----------
 
     private fun startRoadNetworkDownload(def: OfflineRegionDef) {
+      try {
         val dialogView = layoutInflater.inflate(R.layout.dialog_download_progress, null)
         val tvName = dialogView.findViewById<TextView>(R.id.tvDownloadRegionName)
         val progressBar = dialogView.findViewById<ProgressBar>(R.id.progressBarDownload)
@@ -401,6 +423,9 @@ class SettingsActivity : AppCompatActivity() {
                 }
             }
         )
+      } catch (e: Exception) {
+          Toast.makeText(this, "[تشخيص] استثناء في startRoadNetworkDownload: ${e.javaClass.simpleName}: ${e.message}", Toast.LENGTH_LONG).show()
+      }
     }
 
     private fun deleteRoadNetworkCache(def: OfflineRegionDef) {
