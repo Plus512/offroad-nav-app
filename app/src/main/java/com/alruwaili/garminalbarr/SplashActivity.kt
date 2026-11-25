@@ -234,7 +234,7 @@ class SplashActivity : AppCompatActivity() {
             val intent = Intent(this@SplashActivity, WelcomeActivity::class.java)
             startActivity(intent)
         } else {
-            val intent = Intent(this@SplashActivity, com.alruwaili.garminalbarr.map.DesertMapActivity::class.java)
+            val intent = Intent(this@SplashActivity, com.alruwaili.garminalbarr.legacymap.MainActivity::class.java)
             startActivity(intent)
         }
 
@@ -248,7 +248,7 @@ class SplashActivity : AppCompatActivity() {
      */
     private fun routeByEntitlement() {
         val subManager = (application as MyApplication).subscriptionManager
-        val intent = Intent(this@SplashActivity, com.alruwaili.garminalbarr.map.DesertMapActivity::class.java)
+        val intent = Intent(this@SplashActivity, com.alruwaili.garminalbarr.legacymap.MainActivity::class.java)
         startActivity(intent)
         finish()
     }

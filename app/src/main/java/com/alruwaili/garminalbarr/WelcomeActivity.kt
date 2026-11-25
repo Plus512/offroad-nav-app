@@ -187,7 +187,7 @@ class WelcomeActivity : AppCompatActivity() {
     private fun routeByEntitlement() {
         if (isFinishing || isDestroyed) return
 
-        val intent = Intent(this, com.alruwaili.garminalbarr.map.DesertMapActivity::class.java)
+        val intent = Intent(this, com.alruwaili.garminalbarr.legacymap.MainActivity::class.java)
         startActivity(intent)
         finish()
     }
