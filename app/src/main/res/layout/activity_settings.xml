@@ -13,9 +13,10 @@
         android:textSize="24sp"
         android:padding="16dp" />
 
-    <!-- تبويبان فقط: خريطة (بلاطات العرض) وطرق سيارة (بيانات Overpass المحفوظة محلياً) — وليس
-         أربعة تبويبات كما في «الدليلة بلس» (تضاريس وثلاثي الأبعاد غير موجودين فعلياً في «الدليلة 2»،
-         فلا نضع تبويباً لميزة غير موجودة حقاً في التطبيق). -->
+    <!-- ثلاث تبويبات: خريطة (بلاطات العرض)، تضاريس (بلاطات ارتفاع AWS Terrarium المحفوظة محلياً)،
+         وطرق سيارة (بيانات Overpass المحفوظة محلياً) — نفس التقسيم الحرفي الذي طلبه المستخدم من
+         قائمة الخرائط في «خرائط الصحراء الدليلة» (خريطة عادية / تضاريس / مسار السيارة لكل دولة).
+         تبويب "ثلاثي الأبعاد" وحده غير موجود هنا، لأنه لا علاقة له بهذه الشاشة أصلاً. -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -30,8 +31,18 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginEnd="6dp"
+            android:layout_marginEnd="4dp"
             android:text="@string/tab_map_tiles" />
+
+        <Button
+            android:id="@+id/tabTerrain"
+            style="@style/Widget.DalilAlBar.NeonDialogButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
+            android:text="@string/tab_terrain" />
 
         <Button
             android:id="@+id/tabRoadNetwork"
@@ -39,7 +50,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginStart="6dp"
+            android:layout_marginStart="4dp"
             android:text="@string/tab_road_network" />
     </LinearLayout>
 

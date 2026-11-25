@@ -10,28 +10,36 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import com.alruwaili.dalilalbar.nav.RoadNetworkCache
+import com.alruwaili.dalilalbar.nav.TerrainTileCache
 import org.maplibre.android.offline.OfflineRegion
 
 /**
  * شاشة "إدارة الخرائط" — أُعيدت كتابتها بالكامل لتطابق تصميم شاشة الخرائط في «الدليلة بلس»
- * المرجعية: تبويبان وبطاقة لكل دولة/منطقة (علم + اسم عربي—إنجليزي + حجم حقيقي + زر تحميل/حذف).
+ * المرجعية: بطاقة لكل دولة/منطقة (علم + اسم عربي—إنجليزي + حجم حقيقي + زر تحميل/حذف)، بنفس
+ * التقسيم الحرفي الذي طلبه المستخدم من قائمة الخرائط في تطبيق «خرائط الصحراء الدليلة»: لكل دولة
+ * ثلاث فئات — خريطة عادية، تضاريس، مسار السيارة.
  *
- * تنبيه صدق مهم: المرجع «الدليلة بلس» يعرض أربعة تبويبات (خريطة، طرق سيارة، تضاريس، ثلاثي الأبعاد).
- * هنا تبويبان فقط فعلياً موجودان في «الدليلة 2» — خريطة (بلاطات MapLibre) وطرق سيارة (بيانات
- * Overpass المحفوظة محلياً) — لأن ميزتَي التضاريس والعرض ثلاثي الأبعاد غير مطبَّقتين في هذا التطبيق
- * إطلاقاً، فلا نضع لهما تبويباً مزيَّفاً لا وظيفة حقيقية خلفه.
+ * تحديث (٢٥ نوفمبر): أُضيف تبويب "تضاريس" حقيقي (TERRAIN) — تنزيل فعلي لبلاطات ارتفاع AWS
+ * Terrarium عبر [TerrainTileCache]/[OfflineRegionsController.downloadTerrain]، وليس تبويباً
+ * مزيَّفاً. تنبيه صدق: لا تُحمَّل كل مستويات التكبير (حتى 15)، بل فقط 6–10 (انظر التعليق على
+ * TERRAIN_MIN_ZOOM/TERRAIN_MAX_ZOOM في OfflineRegionsController) تفادياً لحجم تنزيل غير عملي
+ * لمساحة دولة كاملة؛ عند تكبير أعلى من ذلك دون اتصال، قد لا تظهر طبقة التظليل في تلك البقعة.
+ * تبويب "ثلاثي الأبعاد" وحده لا يزال غير موجود هنا فعلياً (لا علاقة له بهذه الشاشة أصلاً حسب
+ * طلب المستخدم الصريح في تطبيق «الدليلة بلس» — زر 3D مستقل تماماً عن قائمة إدارة الخرائط).
  *
  * حجم بلاطات الخريطة (تبويب "خريطة") غير معروف مسبقاً قبل اكتمال التحميل فعلياً (لا توفّر مكتبة
  * MapLibre تقديراً مسبقاً لحجم منطقة Offline)، فنعرض له دائماً نص "الحجم يُحدَّد أثناء التحميل"
- * بدل اختراع رقم. أما حجم بيانات مسار السيارة (تبويب "طرق سيارة") فحجم حقيقي فعلي من
- * RoadNetworkCache.cachedSizeMb (قراءة حجم ملف فعلي على القرص)، وليس تقديراً.
+ * بدل اختراع رقم. أما حجم بيانات مسار السيارة والتضاريس فحجم حقيقي فعلي (RoadNetworkCache./
+ * TerrainTileCache.cachedSizeMb — قراءة حجم ملفات فعلية على القرص)، وليس تقديراً.
  */
 class SettingsActivity : AppCompatActivity() {
 
-    private enum class Tab { MAP_TILES, ROAD_NETWORK }
+    private enum class Tab { MAP_TILES, TERRAIN, ROAD_NETWORK }
 
     private lateinit var offlineController: OfflineRegionsController
     private lateinit var tabMapTiles: Button
+    private lateinit var tabTerrain: Button
     private lateinit var tabRoadNetwork: Button
     private lateinit var cardsContainer: LinearLayout
 
@@ -45,10 +53,12 @@ class SettingsActivity : AppCompatActivity() {
         offlineController = OfflineRegionsController(applicationContext)
 
         tabMapTiles = findViewById(R.id.tabMapTiles)
+        tabTerrain = findViewById(R.id.tabTerrain)
         tabRoadNetwork = findViewById(R.id.tabRoadNetwork)
         cardsContainer = findViewById(R.id.regionCardsContainer)
 
         tabMapTiles.setOnClickListener { switchTab(Tab.MAP_TILES) }
+        tabTerrain.setOnClickListener { switchTab(Tab.TERRAIN) }
         tabRoadNetwork.setOnClickListener { switchTab(Tab.ROAD_NETWORK) }
 
         switchTab(Tab.MAP_TILES)
@@ -61,6 +71,9 @@ class SettingsActivity : AppCompatActivity() {
         tabMapTiles.setBackgroundResource(
             if (tab == Tab.MAP_TILES) R.drawable.bg_neon_tab_active else R.drawable.bg_neon_card
         )
+        tabTerrain.setBackgroundResource(
+            if (tab == Tab.TERRAIN) R.drawable.bg_neon_tab_active else R.drawable.bg_neon_card
+        )
         tabRoadNetwork.setBackgroundResource(
             if (tab == Tab.ROAD_NETWORK) R.drawable.bg_neon_tab_active else R.drawable.bg_neon_card
         )
@@ -72,6 +85,7 @@ class SettingsActivity : AppCompatActivity() {
             Tab.MAP_TILES -> offlineController.listDownloadedRegions { pairs ->
                 runOnUiThread { renderMapTilesCards(pairs) }
             }
+            Tab.TERRAIN -> renderTerrainCards()
             Tab.ROAD_NETWORK -> renderRoadNetworkCards()
         }
     }
@@ -241,6 +255,93 @@ class SettingsActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    // ---------- تبويب "تضاريس" (بلاطات ارتفاع AWS Terrarium المحفوظة محلياً) ----------
+
+    private fun renderTerrainCards() {
+        cardsContainer.removeAllViews()
+        OfflineRegionDef.entries.forEach { def ->
+            val cached = TerrainTileCache.isCached(this, def.id)
+            val sizeMb = if (cached) TerrainTileCache.cachedSizeMb(this, def.id) else null
+            val sizeText = if (cached && sizeMb != null) {
+                getString(R.string.size_mb_format, sizeMb)
+            } else {
+                getString(R.string.size_unknown)
+            }
+            addRegionCard(
+                def = def,
+                sizeText = sizeText,
+                isDownloaded = cached,
+                onDownloadClick = { startTerrainDownload(def) },
+                onDeleteClick = { deleteTerrainCache(def) }
+            )
+        }
+    }
+
+    private fun startTerrainDownload(def: OfflineRegionDef) {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_download_progress, null)
+        val tvName = dialogView.findViewById<TextView>(R.id.tvDownloadRegionName)
+        val progressBar = dialogView.findViewById<ProgressBar>(R.id.progressBarDownload)
+        val tvPercent = dialogView.findViewById<TextView>(R.id.tvDownloadPercent)
+        val btnPause = dialogView.findViewById<Button>(R.id.btnDownloadPause)
+        val btnCancel = dialogView.findViewById<Button>(R.id.btnDownloadCancel)
+        val btnBackground = dialogView.findViewById<Button>(R.id.btnDownloadBackground)
+        tvName.text = "تضاريس: ${def.arabicName}"
+        btnPause.visibility = View.GONE // لا يوجد استئناف جزئي حقيقي لهذا المسار، كما في طرق السيارة
+
+        var cancelled = false
+        val dialog = AlertDialog.Builder(this, R.style.Theme_DalilAlBar_NeonDialog)
+            .setView(dialogView)
+            .setCancelable(false)
+            .create()
+        btnCancel.setOnClickListener {
+            // كما في تحميل طرق السيارة: لا يوقف اتصالات الشبكة الجارية فعلياً فوراً، فقط يُخفي
+            // الواجهة ويتجاهل نتيجتها — صدقاً دون ادّعاء إلغاء شبكي فوري غير موجود فعلاً.
+            cancelled = true
+            dialog.dismiss()
+            renderCards()
+        }
+        btnBackground.setOnClickListener { dialog.dismiss() }
+        dialog.show()
+
+        offlineController.downloadTerrain(
+            def,
+            object : OfflineRegionsController.TerrainProgressListener {
+                override fun onProgress(d: OfflineRegionDef, percent: Int) {
+                    if (cancelled) return
+                    progressBar.progress = percent
+                    tvPercent.text = "$percent%"
+                }
+
+                override fun onComplete(d: OfflineRegionDef, failedTiles: Int, totalTiles: Int) {
+                    if (cancelled) return
+                    if (dialog.isShowing) dialog.dismiss()
+                    val msg = if (failedTiles > 0) {
+                        "تم حفظ تضاريس ${d.arabicName} جزئياً (فشلت $failedTiles من $totalTiles بلاطة — بعض البقع ستعتمد على الإنترنت المباشر)"
+                    } else {
+                        "تم حفظ تضاريس ${d.arabicName} كاملة دون انترنت"
+                    }
+                    Toast.makeText(this@SettingsActivity, msg, Toast.LENGTH_LONG).show()
+                    renderCards()
+                }
+
+                override fun onDownloadError(d: OfflineRegionDef, message: String) {
+                    if (cancelled) return
+                    if (dialog.isShowing) dialog.dismiss()
+                    Toast.makeText(this@SettingsActivity, message, Toast.LENGTH_LONG).show()
+                    renderCards()
+                }
+            }
+        )
+    }
+
+    private fun deleteTerrainCache(def: OfflineRegionDef) {
+        val success = TerrainTileCache.deleteCache(this, def.id)
+        if (success) {
+            Toast.makeText(this, getString(R.string.map_deleted, def.arabicName), Toast.LENGTH_SHORT).show()
+        }
+        renderCards()
     }
 
     // ---------- تبويب "طرق (سيارة)" (بيانات Overpass المحفوظة محلياً) ----------

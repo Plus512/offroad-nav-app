@@ -24,6 +24,7 @@
     <string name="download_new_map">تحميل / إعادة تحميل خريطة</string>
     <string name="manage_maps_title">إدارة الخرائط</string>
     <string name="tab_map_tiles">خريطة</string>
+    <string name="tab_terrain">تضاريس</string>
     <string name="tab_road_network">طرق (سيارة)</string>
     <string name="action_download">تحميل</string>
     <string name="size_mb_format">≈ %.1f م.ب</string>
