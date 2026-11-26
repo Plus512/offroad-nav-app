@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- إضافة 2026-11-26: اهتزاز تنبيه الاقتراب/الوصول إلى الوجهة (DesertMapActivity.vibrateAlert). -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
@@ -71,6 +73,10 @@
         </activity>
         <service
             android:name=".track.TrackRecordingService"
+            android:foregroundServiceType="location"
+            android:exported="false" />
+        <service
+            android:name=".network.NetworkSpotterService"
             android:foregroundServiceType="location"
             android:exported="false" />
 

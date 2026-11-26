@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -93,7 +95,17 @@ fun DesertMindDialog(
             Text("العقل الصحراوي الذكي", color = DesertGold, fontWeight = FontWeight.Bold, fontSize = 18.sp)
         },
         text = {
-            Column(modifier = Modifier.heightIn(max = 460.dp)) {
+            // إصلاح 2026-11-26: سابقًا كان هذا الـ Column غير قابل للتمرير بارتفاع أقصى
+            // ثابت (460.dp) — فحين تتجاوز قائمة الأسئلة + بطاقة الإجابة هذا الارتفاع
+            // (كما يحصل دائمًا تقريبًا مع إجابات "أقرب ..." التي تضيف سطرَي المسافة
+            // والاتجاه زائد زر "اذهب إلى")، كان الزائد يُقصّ بصمت بدل أن يظهر — فتبدو
+            // الإجابة وكأنها ناقصة (بلا مسافة ولا زر) رغم أن [DesertMindEngine] يُعيدها
+            // كاملة فعليًا. الآن يمكن التمرير لرؤية الإجابة والزر دائمًا.
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 460.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
                 Text(
                     text = "أسئلة ثابتة تُحسب بالكامل دون إنترنت من موقعك الحالي وقاعدة بيانات المواقع المحفوظة.",
                     color = DesertMuted,

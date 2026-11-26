@@ -4,7 +4,11 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.GnssStatus
+import android.location.LocationManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.core.app.ActivityCompat
@@ -34,7 +38,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -61,6 +65,9 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import com.alruwaili.garminalbarr.FavoritesActivity
 import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.util.Log
 import com.alruwaili.garminalbarr.LocationEntity
 import com.alruwaili.garminalbarr.MyApplication
@@ -167,6 +174,18 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
     // ارتفاع حقيقي من ذاكرة التخزين المؤقت لبيانات DEM (TerrainElevationLookup) — يُحسب في
     // Dispatchers.IO عند فتح شاشة المساعد الرقمي فقط (ليس عند كل إعادة رسم)، وليس بيانات وهمية.
     private val digitalAssistantElevationState = mutableStateOf<Double?>(null)
+    // نطاق البحث عن المواقع القريبة في شاشة "الملاحة الرقمية" (قابل للتعديل من المستخدم عبر
+    // نفس نافذة اختيار النطاق المستخدمة في "الرادار الصحراوي")، بالكيلومتر.
+    private val digitalAssistantRadiusKmState = mutableStateOf(DesertRadarEngine.DEFAULT_RADIUS_KM)
+    private val showDigitalAssistantRadiusDialogState = mutableStateOf(false)
+    // عدّاد يزداد بزر "مسح جديد" فقط، كي يُجبر إعادة حساب الارتفاع الحقيقي فورًا حتى لو لم
+    // يتغيّر الموقع (بدل الاكتفاء بإعادة الحساب التلقائية عند تغيّر الإحداثيات فقط).
+    private val digitalAssistantRescanNonceState = mutableStateOf(0)
+    // عدد الأقمار الصناعية (GNSS) المرئية فعليًا الآن من مستشعر الـ GPS الحقيقي في الجهاز —
+    // يُحدَّث حيًا عبر GnssStatus.Callback (مسجَّل في onResume، يُلغى في onPause)، وليس رقمًا
+    // ثابتًا أو وهميًا.
+    private val gnssSatellitesInViewState = mutableStateOf<Int?>(null)
+    private var gnssStatusCallback: GnssStatus.Callback? = null
     private val showSaveTrackDialog = mutableStateOf(false)
     private val showDiscardTrackDialog = mutableStateOf(false)
     private val showCarRouteOptionsDialog = mutableStateOf(false)
@@ -232,6 +251,77 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
     private val isAutoFollowSuspendedState = mutableStateOf(false)
     private val isCourseUpState = mutableStateOf(false)
 
+    // ---- تنبيه الاقتراب من الوجهة (طلب المستخدم 2026-11-26) ----
+    // مسافة التنبيه = 20% من إجمالي مسافة الرحلة (مثال: 5 كم رحلة ← تنبيه عند تبقّي 1 كم،
+    // 10 كم رحلة ← تنبيه عند تبقّي 2 كم)، على ألا تتجاوز مسافة التنبيه 5 كم مهما طالت
+    // الرحلة. يُحسب "إجمالي المسافة" من أول قراءة مسافة متبقية بعد بدء مسار جديد (قريبة
+    // جدًا من الإجمالي الفعلي لأن التوجيه بدأ للتو)، ويُعاد ضبطه عند كل مسار جديد. كل تنبيه
+    // (الاقتراب + الوصول) يُطلَق مرة واحدة فقط لكل رحلة — ليس في كل قراءة GPS.
+    private var routeBaselineDistanceMeters: Double? = null
+    private var proximityAlertFired = false
+    private var arrivalAlertFired = false
+    private val PROXIMITY_ALERT_RATIO = 0.2
+    private val PROXIMITY_ALERT_MAX_METERS = 5000.0
+
+    private fun resetProximityAlertState() {
+        routeBaselineDistanceMeters = null
+        proximityAlertFired = false
+        arrivalAlertFired = false
+    }
+
+    // إصلاح/إضافة 2026-11-26 (طلب المستخدم — "نفّذ حرفيًا" بعد عرض خيار الاهتزاز): اهتزاز
+    // فعلي للهاتف مرفقًا بكل تنبيه اقتراب/وصول، minSdk=26 فيكفي VibrationEffect.createOneShot
+    // دومًا (متاح من API 26)، مع التفرّع فقط على VibratorManager (API 31+) مقابل Vibrator
+    // القديم (26-30) لجلب كائن الاهتزاز نفسه.
+    private fun vibrateAlert(durationMs: Long = 400L) {
+        try {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                (getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            }
+            if (vibrator != null && vibrator.hasVibrator()) {
+                vibrator.vibrate(VibrationEffect.createOneShot(durationMs, VibrationEffect.DEFAULT_AMPLITUDE))
+            }
+        } catch (_: Exception) {
+            // اهتزاز اختياري بحت — أي فشل (جهاز بلا محرك اهتزاز، صلاحية مرفوضة، إلخ) يُتجاهل
+            // بصمت دون التأثير على التنبيه النصي (Toast) نفسه الذي يبقى يعمل دومًا.
+        }
+    }
+
+    private fun checkProximityAlert(remainingMeters: Double) {
+        if (routeBaselineDistanceMeters == null) {
+            routeBaselineDistanceMeters = remainingMeters
+        }
+        val baseline = routeBaselineDistanceMeters ?: return
+        if (!arrivalAlertFired && NavigationMath.isArrived(remainingMeters)) {
+            arrivalAlertFired = true
+            val destName = activeRouteNameState.value
+            vibrateAlert(durationMs = 600L)
+            Toast.makeText(
+                this,
+                if (destName != null) "لقد وصلت إلى \"$destName\"" else "لقد وصلت إلى وجهتك",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        if (!proximityAlertFired && !NavigationMath.isArrived(remainingMeters)) {
+            val alertThreshold = (baseline * PROXIMITY_ALERT_RATIO).coerceAtMost(PROXIMITY_ALERT_MAX_METERS)
+            if (remainingMeters <= alertThreshold) {
+                proximityAlertFired = true
+                val destName = activeRouteNameState.value
+                val remainingText = NavigationMath.formatRemaining(remainingMeters)
+                vibrateAlert(durationMs = 400L)
+                Toast.makeText(
+                    this,
+                    if (destName != null) "اقتربت من \"$destName\" — تبقّى $remainingText" else "اقتربت من وجهتك — تبقّى $remainingText",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+
     override fun onRegionChanged(region: MapRegion?) {
         pendingRegion.value = region
     }
@@ -281,6 +371,11 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
             remainingMetersState.value = null
             bearingState.floatValue = Float.NaN
             isAutoFollowSuspendedState.value = false
+            resetProximityAlertState()
+        } else {
+            // مسار جديد بدأ فعليًا الآن: صفّر حالة تنبيه الاقتراب كي يُحسب إجمالي المسافة
+            // من جديد لهذه الرحلة تحديدًا (لا تنبيه الرحلة السابقة).
+            resetProximityAlertState()
         }
     }
 
@@ -291,6 +386,7 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
     override fun onNavigationProgress(remainingMeters: Double, bearingDeg: Float) {
         remainingMetersState.value = remainingMeters
         bearingState.floatValue = bearingDeg
+        checkProximityAlert(remainingMeters)
     }
 
     override fun onHeadingUpChanged(isHeadingUp: Boolean) {
@@ -780,14 +876,14 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
             val remainingMeters = remainingMetersState.value
             val recSnapshot = recordingSnapshotState.value
             val isSpotterActive = isNetworkSpotterActiveState.value
-            // ترتيب ثابت لعمود الأزرار الدائرية على يمين الشاشة: البوصلة (عند وجود مسار
-            // نشط فقط) ← راصد الشبكة ← المساعد الرقمي ← الأدوات. عند ظهور شريط الوجهة
-            // والمسافة أعلى الشاشة (hasRoute) يُزاح العمود بالكامل للأسفل بمقدار ثابت حتى
-            // لا يتراكب معه، ومع زر البوصلة الصغير الذي يظهر فوقه فقط في تلك الحالة.
-            val rightColumnCompassTop = 136.dp
-            val rightColumnNetworkSpotterTop = if (hasRoute) 200.dp else 48.dp
-            val rightColumnDigitalAssistantTop = if (hasRoute) 264.dp else 112.dp
-            val rightColumnToolsTop = if (hasRoute) 328.dp else 176.dp
+            // ترتيب ثابت لعمود الأزرار الدائرية على يمين الشاشة من الأعلى للأسفل: البوصلة
+            // (دائمًا ظاهرة، حتى بلا وجهة مختارة — إصلاح 2026-11-26) ← راصد الشبكة ← المساعد
+            // الرقمي ← الأدوات. عند ظهور شريط الوجهة والمسافة أعلى الشاشة (hasRoute) يُزاح
+            // العمود بالكامل للأسفل بمقدار ثابت حتى لا يتراكب معه.
+            val rightColumnCompassTop = if (hasRoute) 200.dp else 48.dp
+            val rightColumnNetworkSpotterTop = if (hasRoute) 264.dp else 112.dp
+            val rightColumnDigitalAssistantTop = if (hasRoute) 328.dp else 176.dp
+            val rightColumnToolsTop = if (hasRoute) 392.dp else 240.dp
             // إصلاح 2026-11-26: شاشة "الرادار الصحراوي" ملء الشاشة كانت تُرسم في الشجرة قبل
             // شريط راصد الشبكة العلوي وزر/لوحة تسجيل الأثر، فكانا يظهران فوقها (ترتيب Z في
             // Compose يتبع ترتيب الكود، لا الظهور البصري فقط) ويغطيان شريط "ظهر حتى الآن X من
@@ -916,7 +1012,66 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
                         modifier = Modifier.fillMaxSize()
                     )
 
-                    // Unified floating Navigation HUD (distance-only subtitle)
+                    // إصلاح 2026-11-26 (طلب المستخدم): شريط "مباشر"/الإحداثيات أعلى الشاشة
+                    // كان يظهر فقط عند وجود مسار نشط (hasRoute && activeRouteName != null).
+                    // بلا وجهة لا يوجد اسم وجهة ولا مسافة متبقية حقيقية لعرضها — فبدل تلفيق
+                    // بيانات مسار غير موجودة، يظهر الآن شريط مبسّط صادق بإحداثيات GPS الحية
+                    // فقط ("🧭 مباشر" + الإحداثيات)، بلا زري تعديل/حذف مسار (لا مسار لتعديله
+                    // أو حذفه أصلاً). الشريط الكامل (بالاسم + المسافة + التعديل + الحذف) يبقى
+                    // كما كان تمامًا عند وجود مسار نشط فعليًا.
+                    if (pickingSlotType == null && !hasRoute) {
+                        val liveCoordsBarLocState = remember { mutableStateOf<GeoPoint?>(null) }
+                        LaunchedEffect(Unit) {
+                            while (true) {
+                                liveCoordsBarLocState.value = try { osmdroidFragment?.getCurrentUserLocation() } catch (_: Exception) { null }
+                                delay(1000L)
+                            }
+                        }
+                        val loc = liveCoordsBarLocState.value
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = Color(0xE61F1A16),
+                            border = BorderStroke(1.dp, Color(0xFFDDA01E)),
+                            shadowElevation = 6.dp,
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = 48.dp, start = 16.dp, end = 16.dp)
+                                .fillMaxWidth()
+                                .widthIn(max = 440.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = Color(0xFF2C2013),
+                                    border = BorderStroke(1.dp, Color(0xFFDDA01E))
+                                ) {
+                                    Text(
+                                        text = "🧭 مباشر",
+                                        color = Color(0xFFDDA01E),
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = if (loc != null) {
+                                        String.format(java.util.Locale.US, "%.5f, %.5f", loc.latitude, loc.longitude)
+                                    } else {
+                                        "جاري تحديد الموقع..."
+                                    },
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+
                     if (hasRoute && pickingSlotType == null && activeRouteName != null) {
                         NavigationHud(
                             state = ActiveRouteUiState(
@@ -962,16 +1117,27 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
                                 .widthIn(max = 440.dp)
                         )
 
-                        // Floating Mini Target Compass (below HUD, Top-Right physical alignment)
-                        val destSlot = activeDestSlotState.value
-                        if (destSlot != null) {
-                            FloatingMiniTargetCompass(
-                                azimuthState = azimuthState,
-                                bearingState = bearingState,
-                                activeDestState = activeDestSlotState,
-                                activeOriginState = activeOriginSlotState,
-                                locationProvider = { osmdroidFragment?.getCurrentUserLocation() },
-                                onClick = {
+                    }
+
+                    // إصلاح 2026-11-26 (طلب المستخدم): البوصلة الصغيرة كانت مقيّدة بشرط
+                    // "destSlot != null" وداخل شرط hasRoute الخارجي — فلا تظهر إطلاقًا بلا
+                    // وجهة نشطة. الآن تظهر دائمًا كرابع أيقونة ثابتة في العمود الجانبي (فوق
+                    // راصد الشبكة/الملاحة الرقمية/الأدوات)، بلا ربط بوجود مسار. FloatingMini
+                    // TargetCompass نفسه يتعامل بأمان مع عدم وجود وجهة (يُخفي السهم فقط،
+                    // القرص يبقى ظاهرًا) — تم التأكد من ذلك مسبقًا بقراءة كامل الملف. الضغط
+                    // بلا وجهة يُعلم المستخدم بدل أن يفعل شيئًا صامتًا قد يبدو كخلل آخر.
+                    if (pickingSlotType == null && !isRadarOpen) {
+                        FloatingMiniTargetCompass(
+                            azimuthState = azimuthState,
+                            bearingState = bearingState,
+                            activeDestState = activeDestSlotState,
+                            activeOriginState = activeOriginSlotState,
+                            locationProvider = { osmdroidFragment?.getCurrentUserLocation() },
+                            onClick = {
+                                val destSlot = activeDestSlotState.value
+                                if (destSlot == null) {
+                                    Toast.makeText(this@DesertMapActivity, "اختر وجهة أولاً لعرض اتجاهها على البوصلة", Toast.LENGTH_SHORT).show()
+                                } else {
                                     FeatureGatekeeper.guardAction(this@DesertMapActivity) {
                                         val userLoc = osmdroidFragment?.getCurrentUserLocation()
                                         val uLat = userLoc?.latitude ?: activeOriginSlotState.value?.latitude ?: destSlot.latitude
@@ -982,19 +1148,19 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
                                             userLon = uLon
                                         )
                                     }
-                                },
-                                modifier = Modifier
-                                    .align(AbsoluteAlignment.TopRight)
-                                    .absolutePadding(top = rightColumnCompassTop, right = 16.dp)
-                            )
-                        }
+                                }
+                            },
+                            modifier = Modifier
+                                .align(AbsoluteAlignment.TopRight)
+                                .absolutePadding(top = rightColumnCompassTop, right = 16.dp)
+                        )
                     }
 
                     // عمود الأزرار الدائرية الثابت على يمين الشاشة. الترتيب من الأعلى للأسفل
-                    // ثابت دائمًا: البوصلة (فوق، عند وجود مسار نشط فقط) ← راصد الشبكة ←
-                    // المساعد الرقمي ← الأدوات. عندما يظهر شريط الوجهة/المسافة أعلى الشاشة
-                    // (hasRoute)، يُزاح العمود بالكامل للأسفل كي لا يتراكب معه أو مع زر
-                    // البوصلة الصغير أعلاه؛ وإلا يبدأ العمود من أعلى الشاشة مباشرة.
+                    // ثابت دائمًا: البوصلة (الآن دائمة الظهور دومًا، أعلاه مباشرة) ← راصد
+                    // الشبكة ← المساعد الرقمي ← الأدوات. عندما يظهر شريط الوجهة/المسافة أعلى
+                    // الشاشة (hasRoute)، يُزاح العمود بالكامل للأسفل كي لا يتراكب معه؛ وإلا
+                    // يبدأ العمود من أعلى الشاشة مباشرة.
                     if (pickingSlotType == null && !isRadarOpen) {
                         // "راصد الشبكة" (Network Spotter) floating toggle button.
                         NetworkSpotterToggleButton(
@@ -1025,8 +1191,8 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
                         ) {
                             Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                                 Icon(
-                                    imageVector = Icons.Default.Speed,
-                                    contentDescription = "المساعد الرقمي",
+                                    imageVector = Icons.Default.Navigation,
+                                    contentDescription = "الملاحة الرقمية",
                                     tint = Color(0xFFDDA01E),
                                     modifier = Modifier.size(22.dp)
                                 )
@@ -1484,7 +1650,7 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
                     // "المساعد الرقمي" — شاشة HUD كاملة الشاشة فوق كل شيء آخر عند فتحها.
                     if (showDigitalAssistantState.value) {
                         val huLoc = osmdroidFragment?.getCurrentUserLocation()
-                        LaunchedEffect(showDigitalAssistantState.value, huLoc?.latitude, huLoc?.longitude) {
+                        LaunchedEffect(showDigitalAssistantState.value, huLoc?.latitude, huLoc?.longitude, digitalAssistantRescanNonceState.value) {
                             if (huLoc != null) {
                                 digitalAssistantElevationState.value = withContext(Dispatchers.IO) {
                                     TerrainElevationLookup.currentElevationMeters(
@@ -1508,11 +1674,34 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
                             nearbyLocations = desertMindLocationsState.value,
                             userLat = huLoc?.latitude,
                             userLon = huLoc?.longitude,
+                            radiusKm = digitalAssistantRadiusKmState.value,
+                            satellitesInView = gnssSatellitesInViewState.value,
                             onClose = { showDigitalAssistantState.value = false },
                             onComingSoon = {
                                 Toast.makeText(this@DesertMapActivity, "قريبًا إن شاء الله", Toast.LENGTH_SHORT).show()
+                            },
+                            onOpenRadiusSettings = { showDigitalAssistantRadiusDialogState.value = true },
+                            onRescan = {
+                                digitalAssistantRescanNonceState.value += 1
+                                Toast.makeText(this@DesertMapActivity, "جارٍ تحديث البيانات…", Toast.LENGTH_SHORT).show()
+                            },
+                            onGoTo = { lat, lon, title ->
+                                FeatureGatekeeper.guardAction(this@DesertMapActivity) {
+                                    showDigitalAssistantState.value = false
+                                    MapNavigationHelper.goToDesertMap(this@DesertMapActivity, lat, lon, title, openCompass = true)
+                                }
                             }
                         )
+
+                        if (showDigitalAssistantRadiusDialogState.value) {
+                            DesertRadarRadiusDialog(
+                                onStart = { newRadiusKm ->
+                                    digitalAssistantRadiusKmState.value = newRadiusKm
+                                    showDigitalAssistantRadiusDialogState.value = false
+                                },
+                                onDismiss = { showDigitalAssistantRadiusDialogState.value = false }
+                            )
+                        }
                     }
 
                     // "الرؤية الصحراوية X-Ray" — إعادة تصميم 2026-11-26: بدل تبديل تشغيل/
@@ -1566,6 +1755,11 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
                                             if (xrUserLoc != null) {
                                                 osmdroidFragment?.animateToLocation(xrUserLoc, zoomForSpanKm(4.5), 500L)
                                             }
+                                            // إصلاح 2026-11-26: كانت هذه الطبقة الشبه-معتمة تبقى ظاهرة
+                                            // فوق الخريطة إلى الأبد بعد اختيار أي مستوى (لا شيء كان يُغلقها
+                                            // سوى زر "خروج" الذي يُطفئ X-Ray نفسه) — فتبدو الأزرار وكأنها
+                                            // "لا تعمل" رغم أن الطبقة الحقيقية كانت تُفعَّل فعليًا خلفها.
+                                            showXRayExperienceState.value = false
                                         }
                                 ) {
                                     Column(modifier = Modifier.padding(14.dp)) {
@@ -1591,6 +1785,7 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
                                             if (center != null) {
                                                 osmdroidFragment?.animateToLocation(center, zoomForSpanKm(10.0), 500L)
                                             }
+                                            showXRayExperienceState.value = false
                                         }
                                 ) {
                                     Column(modifier = Modifier.padding(14.dp)) {
@@ -1624,6 +1819,7 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
                                             } else if (xrUserLoc != null) {
                                                 osmdroidFragment?.animateToLocation(xrUserLoc, zoomForSpanKm(4.5), 500L)
                                             }
+                                            showXRayExperienceState.value = false
                                         }
                                 ) {
                                     Column(modifier = Modifier.padding(14.dp)) {
@@ -1785,12 +1981,58 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
         enforceEntitlementOnActiveRoute()
         isCourseUpState.value = (osmdroidFragment?.getOrientationMode() == OsmdroidMapFragment.MapOrientationMode.COURSE_UP)
         syncActiveRouteFromPersistence()
+        registerGnssStatusListener()
+    }
+
+    override fun onPause() {
+        unregisterGnssStatusListener()
+        super.onPause()
     }
 
     override fun onDestroy() {
         inAppUpdater?.release()
         inAppUpdater = null
         super.onDestroy()
+    }
+
+    // عدّاد الأقمار الصناعية الحقيقي لشاشة "الملاحة الرقمية" — يعمل فقط أثناء ظهور الشاشة
+    // (onResume/onPause) حتى لا يستهلك بطارية الجهاز دون داعٍ عندما يكون التطبيق في الخلفية.
+    private fun registerGnssStatusListener() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            gnssSatellitesInViewState.value = null
+            return
+        }
+        if (gnssStatusCallback != null) return
+        val locationManager = getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return
+        val callback = object : GnssStatus.Callback() {
+            override fun onSatelliteStatusChanged(status: GnssStatus) {
+                gnssSatellitesInViewState.value = status.satelliteCount
+            }
+
+            override fun onStopped() {
+                gnssSatellitesInViewState.value = null
+            }
+        }
+        try {
+            locationManager.registerGnssStatusCallback(callback, Handler(Looper.getMainLooper()))
+            gnssStatusCallback = callback
+        } catch (_: SecurityException) {
+            gnssSatellitesInViewState.value = null
+        }
+    }
+
+    private fun unregisterGnssStatusListener() {
+        val locationManager = getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+        gnssStatusCallback?.let { callback ->
+            try {
+                locationManager?.unregisterGnssStatusCallback(callback)
+            } catch (_: SecurityException) {
+                // لا شيء يُفعل — الإذن قد يكون أُلغي أثناء تشغيل التطبيق.
+            }
+        }
+        gnssStatusCallback = null
     }
 
     private fun syncActiveRouteFromPersistence() {
@@ -1987,7 +2229,11 @@ class DesertMapActivity : FragmentActivity(), OsmdroidMapFragment.OnMapInteracti
     }
 
     private fun toggleNetworkSpotter() {
-        if (isNetworkSpotterActiveState.value) {
+        // إصلاح 2026-11-26: كانت هذه الدالة تتحقق من isNetworkSpotterActiveState.value (نسخة
+        // منسوخة داخل الواجهة عبر collect من تدفق الخدمة)، وهي عرضة لتأخّر بسيط في التزامن.
+        // الآن تُقرأ حالة التشغيل الحقيقية مباشرة من مصدرها الوحيد (NetworkSpotterService.isActive.value)
+        // بلا أي وسيط، فلا يمكن أن يُقرأ "متوقف" بالخطأ بينما الخدمة تعمل فعليًا.
+        if (NetworkSpotterService.isActive.value) {
             NetworkSpotterService.stop(this)
             Toast.makeText(this, "تم إيقاف راصد الشبكة", Toast.LENGTH_SHORT).show()
             return

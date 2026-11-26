@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -40,7 +41,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
@@ -207,11 +207,16 @@ fun DesertRadarSweepOverlay(
     // فعلي للخريطة نفسها، فقط حجم خط التسميات داخل الدائرة، فيسهل معرفة المكان بالضبط.
     var labelsExpanded by remember { mutableStateOf(false) }
 
-    // لا خلفية صلبة لكامل الشاشة هنا عمداً (بخلاف التصميم السابق): هذه الشاشة تُرسم فوق
-    // نفس شاشة الخريطة الحية (DesertMapActivity)، فترك الخلفية شفافة خارج عناصر الواجهة
-    // المطلوبة يسمح بظهور الخريطة الفعلية خلفها مباشرة؛ الدائرة نفسها تُقصّ من الخريطة
-    // عبر "ثقب" في طبقة التعتيم (scrim) أدناه، وليس عبر خريطة ثانية منفصلة.
-    Box(modifier = Modifier.fillMaxSize()) {
+    // إعادة تصميم 2026-11-26 (طلب المستخدم): لم تعد هذه الشاشة "ثقبًا" يُظهر الخريطة الحية
+    // خلف الدائرة — كانت أسماء الأماكن المرسومة من الخريطة الفعلية نفسها تتداخل بصريًا مع
+    // أسماء المواقع التي يرسمها الرادار فوقها، فيبدو المنظر مزدحمًا وبدائيًا. الآن الشاشة
+    // رادار رسمي مستقل تمامًا بخلفية داكنة صلبة (بلا خريطة خلفها إطلاقًا)، ولا يظهر فيها إلا
+    // حلقات المدى وحروف الاتجاهات ونقاط المواقع الحقيقية وأسماؤها فقط.
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(DesertDark)
+    ) {
         Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
             Surface(
                 shape = RoundedCornerShape(12.dp),
@@ -230,7 +235,18 @@ fun DesertRadarSweepOverlay(
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp
                         )
-                        TextButton(onClick = onClose) { Text("إغلاق", color = DesertMuted) }
+                        // إصلاح 2026-11-26: زر "إغلاق" النصي الباهت كان يضيع وسط زحمة الأسماء
+                        // المتداخلة في الواجهة القديمة فيبدو وكأنه لا يوجد زر رجوع/إغلاق إطلاقًا.
+                        // الآن دائرة "✕" بارزة بخلفية صلبة في الزاوية، أوضح بصريًا ولا تُخطئها العين.
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .background(DesertCardBorder, shape = androidx.compose.foundation.shape.CircleShape)
+                                .clickable(onClick = onClose),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("✕", color = DesertTan, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        }
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -254,30 +270,47 @@ fun DesertRadarSweepOverlay(
             }
             Spacer(modifier = Modifier.height(10.dp))
 
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .clickable { labelsExpanded = !labelsExpanded },
-                contentAlignment = Alignment.Center
+            // إعادة تصميم 2026-11-26 (طلب المستخدم — مطابقة للصورة المرجعية): بدل دائرة
+            // الرادار فوق قائمة سفلية واحدة بعرض الشاشة، الآن ثلاثة أعمدة أفقية — أقرب
+            // المواقع على اليمين، دائرة الرادار بالمنتصف، أقرب المواقع على اليسار؛ القائمة
+            // الواحدة المرتّبة حسب البعد تُقسَّم بالتناوب (الأقرب لليمين، التالي لليسار...).
+            // أول عنصر في Row هو الأقصى يمينًا بصريًا (التطبيق عربي/RTL).
+            val sortedForColumns = targets
+                .filter { revealedIds.contains(it.id) }
+                .sortedBy { it.distanceMeters }
+            val rightColumnTargets = sortedForColumns.filterIndexed { i, _ -> i % 2 == 0 }
+            val leftColumnTargets = sortedForColumns.filterIndexed { i, _ -> i % 2 == 1 }
+
+            Row(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                NearbyColumn(
+                    targets = rightColumnTargets,
+                    onGoTo = onGoTo,
+                    modifier = Modifier
+                        .weight(0.8f)
+                        .fillMaxHeight()
+                )
+
+                Box(
+                    // لا aspectRatio هنا عمدًا: الدمج بين weight() وaspectRatio() في نفس Row غير
+                    // موثوق (قيد قياس متعارض). الدائرة تبقى مُستديرة فعليًا بلا تمدّد لأن الرسم
+                    // داخل Canvas يعتمد size.minDimension (أصغر بُعد) لا العرض/الارتفاع منفردين.
+                    modifier = Modifier
+                        .weight(1.3f)
+                        .fillMaxHeight()
+                        .clickable { labelsExpanded = !labelsExpanded },
+                    contentAlignment = Alignment.Center
+                ) {
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val radiusPx = size.minDimension / 2f
                     val center = Offset(size.width / 2f, size.height / 2f)
 
-                    // طبقة تعتيم مع "ثقب" دائري: كل ما هو خارج دائرة الرادار يُعتَّم بلون
-                    // داكن شبه شفاف، وداخل الدائرة يبقى صافياً فتظهر الخريطة الفعلية الحية
-                    // (المرسومة أصلاً خلف هذه الشاشة بالكامل) بشكل دائري، بدل خلفية سوداء
-                    // مجردة كما كان سابقاً.
-                    val scrimPath = Path().apply {
-                        fillType = androidx.compose.ui.graphics.PathFillType.EvenOdd
-                        addRect(androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height))
-                        addOval(androidx.compose.ui.geometry.Rect(
-                            center.x - radiusPx, center.y - radiusPx,
-                            center.x + radiusPx, center.y + radiusPx
-                        ))
-                    }
-                    drawPath(path = scrimPath, color = DesertDark.copy(alpha = 0.82f))
+                    // قرص الرادار الرسمي: تعبئة داكنة صلبة كاملة (بلا أي خريطة خلفها)، مع
+                    // حلقات مدى وخطوط شعاعية خفيفة تعطي الطابع الرسمي المطلوب (كما في الصورة
+                    // المرجعية)، بدل "ثقب" يكشف الخريطة الحية كما كان سابقاً.
+                    drawCircle(color = Color(0xFF14100B), radius = radiusPx, center = center)
 
                     // إطار الدائرة
                     drawCircle(color = DesertGold, radius = radiusPx, center = center, style = Stroke(width = 2.dp.toPx()))
@@ -289,6 +322,22 @@ fun DesertRadarSweepOverlay(
                             radius = radiusPx * fraction,
                             center = center,
                             style = Stroke(width = 1.5f)
+                        )
+                    }
+
+                    // خطوط شعاعية خفيفة كل 30 درجة (طابع رادار رسمي، كالصورة المرجعية) — خفيفة
+                    // بما يكفي كي لا تنافس أسماء المواقع على الوضوح.
+                    for (spokeDeg in 0 until 360 step 30) {
+                        val spokeRad = Math.toRadians((spokeDeg - 90.0).toDouble())
+                        val spokeEnd = Offset(
+                            center.x + (radiusPx * cos(spokeRad)).toFloat(),
+                            center.y + (radiusPx * sin(spokeRad)).toFloat()
+                        )
+                        drawLine(
+                            color = DesertGold.copy(alpha = 0.15f),
+                            start = center,
+                            end = spokeEnd,
+                            strokeWidth = 1f
                         )
                     }
 
@@ -338,8 +387,27 @@ fun DesertRadarSweepOverlay(
                     // لمحطات الوقود، بنفسجي للقرى/البيوت، أحمر للجبال/المعالم) + مسافتها
                     // بالكيلومتر/المتر + اسمها — بدل نقطة ذهبية مجردة بلا تمييز كما كان سابقاً.
                     val labelFontSize = if (labelsExpanded) 13.sp else 9.sp
-                    for (target in targets) {
-                        if (!revealedIds.contains(target.id)) continue
+
+                    // إصلاح الازدحام (طلب المستخدم 2026-11-26): عند كثرة المواقع القريبة من
+                    // بعضها، كانت كل الأسماء تُرسم في نفس الموضع النسبي من نقطتها فتتراكم
+                    // فوق بعضها وتصبح غير مقروءة إطلاقًا. الحل: ترتيب المواقع من الأقرب
+                    // للأبعد (الأقرب أولى بالحصول على اسم ظاهر)، ثم تجربة عدة مواضع حول كل
+                    // نقطة (يمين، يسار، أعلى، أسفل) واختيار أول موضع لا يتداخل مع أي اسم
+                    // سبق رسمه. إن لم يوجد موضع خالٍ لاسم معيّن، تُرسم نقطته الملوّنة فقط بلا
+                    // نص (يبقى ظاهرًا ويمكن الوصول إليه من القائمة أسفل الدائرة) بدل حشر
+                    // الاسم فوق أسماء أخرى.
+                    val sortedRevealed = targets
+                        .filter { revealedIds.contains(it.id) }
+                        .sortedBy { it.distanceMeters }
+                    val placedLabelRects = mutableListOf<androidx.compose.ui.geometry.Rect>()
+
+                    // "أبرز المواقع" (طلب المستخدم 2026-11-26): أقرب 3 مواقع ظاهرة تُميَّز بخط
+                    // واضح يصل من نقطتها إلى اسمها (لا مجرد تقريب الاسم من النقطة كبقية
+                    // المواقع)، فيسهل تمييزها بصريًا كأبرز ما في النطاق الحالي.
+                    val prominentCount = minOf(3, sortedRevealed.size)
+
+                    sortedRevealed.forEachIndexed { index, target ->
+                        val isProminent = index < prominentCount
                         val distFraction = (target.distanceMeters / radiusMeters).coerceIn(0.0, 1.0)
                         val pointRad = Math.toRadians((target.bearingDeg - 90.0).toDouble())
                         val point = Offset(
@@ -347,8 +415,10 @@ fun DesertRadarSweepOverlay(
                             center.y + (radiusPx * distFraction * sin(pointRad)).toFloat()
                         )
                         val (_, categoryColor) = PlaceCategoryIcons.iconFor(target.title)
-                        drawCircle(color = categoryColor, radius = if (labelsExpanded) 6f else 4f, center = point)
-                        drawCircle(color = categoryColor, radius = if (labelsExpanded) 6f else 4f, center = point, style = Stroke(width = 1f))
+                        val dotRadius = if (isProminent) 7f else if (labelsExpanded) 6f else 4f
+                        drawCircle(color = categoryColor, radius = dotRadius, center = point)
+                        drawCircle(color = categoryColor, radius = dotRadius, center = point, style = Stroke(width = if (isProminent) 1.5f else 1f))
+
                         val labelText = "${target.title}\n${NavigationMath.formatRemaining(target.distanceMeters)}"
                         val layout = textMeasurer.measure(
                             labelText,
@@ -358,10 +428,37 @@ fun DesertRadarSweepOverlay(
                                 fontWeight = FontWeight.Bold
                             )
                         )
-                        drawText(
-                            textLayoutResult = layout,
-                            topLeft = Offset(point.x + 7f, point.y - layout.size.height / 2f)
+                        val w = layout.size.width.toFloat()
+                        val h = layout.size.height.toFloat()
+                        // المواقع البارزة تبتعد مسافة أكبر (24px) كي يظهر خط رابط واضح بينها
+                        // وبين اسمها؛ بقية المواقع تبقى قريبة من نقطتها (7px) كالسابق.
+                        val gap = if (isProminent) 24f else 7f
+                        val candidates = listOf(
+                            Offset(point.x + gap, point.y - h / 2f),      // يمين النقطة
+                            Offset(point.x - w - gap, point.y - h / 2f),  // يسار النقطة
+                            Offset(point.x - w / 2f, point.y - h - gap),  // أعلى النقطة
+                            Offset(point.x - w / 2f, point.y + gap)       // أسفل النقطة
                         )
+                        for (candidate in candidates) {
+                            val rect = androidx.compose.ui.geometry.Rect(
+                                candidate.x, candidate.y, candidate.x + w, candidate.y + h
+                            )
+                            if (placedLabelRects.none { it.overlaps(rect) }) {
+                                if (isProminent) {
+                                    // خط رابط بارز (أبرز المواقع) من النقطة إلى أقرب حافة لمستطيل النص.
+                                    val labelCenter = Offset(candidate.x + w / 2f, candidate.y + h / 2f)
+                                    drawLine(
+                                        color = categoryColor,
+                                        start = point,
+                                        end = labelCenter,
+                                        strokeWidth = 2f
+                                    )
+                                }
+                                drawText(textLayoutResult = layout, topLeft = candidate)
+                                placedLabelRects.add(rect)
+                                break
+                            }
+                        }
                     }
 
                     // حروف الاتجاهات الأساسية على حافة الدائرة (شمال/شرق/جنوب/غرب) — ثابتة
@@ -391,6 +488,16 @@ fun DesertRadarSweepOverlay(
                     drawCircle(color = Color.White, radius = 3f, center = center)
                 }
             }
+
+                NearbyColumn(
+                    targets = leftColumnTargets,
+                    onGoTo = onGoTo,
+                    modifier = Modifier
+                        .weight(0.8f)
+                        .fillMaxHeight()
+                )
+            }
+
             Text(
                 text = if (labelsExpanded) "اضغط على الدائرة لتصغير الأسماء" else "اضغط على الدائرة لتكبير أسماء المواقع",
                 color = DesertMuted,
@@ -398,24 +505,70 @@ fun DesertRadarSweepOverlay(
                 modifier = Modifier.fillMaxWidth(),
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
+        }
+    }
+}
 
-            Spacer(modifier = Modifier.height(10.dp))
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = DesertCard.copy(alpha = 0.92f),
-                modifier = Modifier.fillMaxWidth().weight(1f)
-            ) {
-                Column(modifier = Modifier.padding(10.dp)) {
-                    Text(text = "المواقع الظاهرة:", color = DesertGold, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(6.dp))
-                    val revealedTargets = targets.filter { revealedIds.contains(it.id) }
-                    LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                        items(revealedTargets, key = { it.id }) { target ->
-                            RadarResultRow(target = target, onGoTo = onGoTo)
-                            Spacer(modifier = Modifier.height(6.dp))
-                        }
-                    }
-                }
+/**
+ * عمود جانبي ضيّق (يمين أو يسار دائرة الرادار) يعرض أقرب المواقع إليه حسب البعد —
+ * جزء من إعادة تصميم 2026-11-26 لمطابقة الصورة المرجعية (قوائم على الجانبين بدل عمود
+ * سفلي واحد بعرض الشاشة).
+ */
+@Composable
+private fun NearbyColumn(
+    targets: List<DesertRadarEngine.RadarTarget>,
+    onGoTo: (lat: Double, lon: Double, title: String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = DesertCard.copy(alpha = 0.92f),
+        modifier = modifier
+    ) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            items(targets, key = { it.id }) { target ->
+                CompactRadarResultRow(target = target, onGoTo = onGoTo)
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompactRadarResultRow(
+    target: DesertRadarEngine.RadarTarget,
+    onGoTo: (lat: Double, lon: Double, title: String) -> Unit
+) {
+    val (icon, iconColor) = PlaceCategoryIcons.iconFor(target.title)
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = DesertCardBorder.copy(alpha = 0.5f),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onGoTo(target.latitude, target.longitude, target.title) }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            androidx.compose.material3.Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = iconColor,
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Column {
+                Text(target.title, color = DesertTan, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(
+                    text = NavigationMath.formatRemaining(target.distanceMeters),
+                    color = DesertMuted,
+                    fontSize = 10.sp
+                )
             }
         }
     }
